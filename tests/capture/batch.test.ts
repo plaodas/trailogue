@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resumeBatch, startBatch } from "../../src/capture/batch";
 import { runBatch, type BatchDriver } from "../../src/capture/runBatch";
+import type { SidebarConversation } from "../../src/capture/sidebar";
 import type { RawCapture } from "../../src/domain/types";
 
 const capture: RawCapture = {
@@ -17,7 +18,7 @@ describe("runBatch", () => {
   it("pauses after three unrecognized pages and resumes only the remainder", async () => {
     const opened: string[] = [];
     const first = await runBatch({
-      state: startBatch(["a", "b", "c", "d", "e"]),
+      state: startBatch(named("a", "b", "c", "d", "e")),
       cancelled: () => false,
       onUpdate: () => {},
       driver: driver({
@@ -32,6 +33,7 @@ describe("runBatch", () => {
     expect(first.phase).toBe("paused");
     expect(first.cursor).toBe(3);
     expect(first.failed).toBe(3);
+    expect(first.failures).toEqual(named("a", "b", "c"));
     expect(opened).toEqual(["a", "b", "c"]);
 
     const rest: string[] = [];
@@ -56,7 +58,7 @@ describe("runBatch", () => {
 
   it("resets the unrecognized streak when another result arrives", async () => {
     const state = await runBatch({
-      state: startBatch(["a", "b", "c", "d"]),
+      state: startBatch(named("a", "b", "c", "d")),
       cancelled: () => false,
       onUpdate: () => {},
       driver: driver({
@@ -71,6 +73,7 @@ describe("runBatch", () => {
     expect(state.phase).toBe("done");
     expect(state.cursor).toBe(4);
     expect(state.unrecognizedStreak).toBe(2);
+    expect(state.failures).toEqual(named("a", "b", "c", "d"));
   });
 
   it("does not open the next conversation after cancellation", async () => {
@@ -78,7 +81,7 @@ describe("runBatch", () => {
     let release: (result: "complete") => void = () => {};
     let stop = false;
     const finished = runBatch({
-      state: startBatch(["a", "b"]),
+      state: startBatch(named("a", "b")),
       cancelled: () => stop,
       onUpdate: () => {},
       driver: driver({
@@ -101,7 +104,7 @@ describe("runBatch", () => {
     let clock = 0;
     let reads = 0;
     const state = await runBatch({
-      state: startBatch(["a"]),
+      state: startBatch(named("a")),
       cancelled: () => false,
       onUpdate: () => {},
       driver: driver({
@@ -122,6 +125,10 @@ describe("runBatch", () => {
     expect(state).toMatchObject({ phase: "done", stored: 1, failed: 0 });
   });
 });
+
+function named(...ids: string[]): SidebarConversation[] {
+  return ids.map((id) => ({ id, title: id }));
+}
 
 let readCount = 0;
 

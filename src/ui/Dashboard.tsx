@@ -8,6 +8,7 @@ import {
   type BatchState,
 } from "../capture/batch";
 import { runBatch } from "../capture/runBatch";
+import type { SidebarConversation } from "../capture/sidebar";
 import type { DashboardPhase, DashboardStatus } from "../capture/status";
 import { transition, type SessionEvent, type SessionState } from "../capture/session";
 import { normalize } from "../domain/normalize";
@@ -45,6 +46,7 @@ export function Dashboard({ repository, archive, capture, sidebar }: Props) {
   const [unreadable, setUnreadable] = useState(0);
   const [batch, setBatch] = useState<BatchState>(idleBatch());
   const [batchMessage, setBatchMessage] = useState<string | null>(null);
+  const [batchFailures, setBatchFailures] = useState<readonly SidebarConversation[]>([]);
 
   const sessionRef = useRef<SessionState>("idle");
   const tabIdRef = useRef<number | null>(null);
@@ -411,6 +413,7 @@ export function Dashboard({ repository, archive, capture, sidebar }: Props) {
       setBatchMessage(copy.batchEmpty);
       return;
     }
+    if (!continued) setBatchFailures([]);
     publishBatch(state);
     const finished = await runBatch({
       state,
@@ -434,6 +437,7 @@ export function Dashboard({ repository, archive, capture, sidebar }: Props) {
     }
     if (finished.phase === "done") {
       setBatchMessage(batchSummary(finished));
+      setBatchFailures(finished.failures);
       publishBatch(idleBatch());
       await refresh();
       return;
@@ -450,6 +454,7 @@ export function Dashboard({ repository, archive, capture, sidebar }: Props) {
   function leaveBatch() {
     batchRun.current += 1;
     setBatchMessage(batchSummary(batchRef.current));
+    setBatchFailures(batchRef.current.failures);
     publishBatch(idleBatch());
     void refresh();
   }
@@ -509,6 +514,7 @@ export function Dashboard({ repository, archive, capture, sidebar }: Props) {
           onOpen={(id) => void openRecord(id)}
           onOpenFolder={() => void openArchiveFolder()}
           message={batchMessage}
+          failures={batchFailures}
           onImport={sidebar ? () => void startSidebarBatch(false) : undefined}
         />
       )}
@@ -772,6 +778,7 @@ function RecordList({
   onOpen,
   onOpenFolder,
   message,
+  failures,
   onImport,
 }: {
   records: Conversation[];
@@ -780,12 +787,14 @@ function RecordList({
   onOpen: (id: string) => void;
   onOpenFolder: () => void;
   message: string | null;
+  failures: readonly SidebarConversation[];
   onImport?: () => void;
 }) {
   return (
     <section>
       <h2>保存した会話</h2>
       {message ? <p>{message}</p> : null}
+      <FailedConversations failures={failures} />
       {onImport ? (
         <button type="button" onClick={onImport}>{copy.batchStart}</button>
       ) : null}
@@ -834,10 +843,11 @@ function BatchPanel({
   return (
     <section>
       <h2>サイドバーの会話</h2>
-      <p>{copy.batchProgress(state.cursor, state.ids.length)}</p>
+      <p>{copy.batchProgress(state.cursor, state.items.length)}</p>
       <p>{copy.batchStored(state.stored)}</p>
       <p>{copy.batchSkipped(state.skipped)}</p>
       <p>{copy.batchFailed(state.failed)}</p>
+      <FailedConversations failures={state.failures} />
       {pausedForStructure ? <p>{copy.batchPaused}</p> : null}
       {state.phase === "paused" && !pausedForStructure ? <p>{copy.batchTabClosed}</p> : null}
       {state.phase === "cancelled" ? <p>{copy.batchCancelled}</p> : null}
@@ -858,7 +868,24 @@ function BatchPanel({
 
 function batchSummary(state: BatchState): string {
   const head = state.phase === "cancelled" ? copy.batchCancelled : copy.batchDone;
-  return `${head}。${copy.batchProgress(state.cursor, state.ids.length)}。${copy.batchStored(state.stored)}、${copy.batchSkipped(state.skipped)}、${copy.batchFailed(state.failed)}`;
+  return `${head}。${copy.batchProgress(state.cursor, state.items.length)}。${copy.batchStored(state.stored)}、${copy.batchSkipped(state.skipped)}、${copy.batchFailed(state.failed)}`;
+}
+
+function FailedConversations({ failures }: { failures: readonly SidebarConversation[] }) {
+  if (failures.length === 0) return null;
+  return (
+    <section>
+      <h3>{copy.batchFailedHeading}</h3>
+      <ul>
+        {failures.map((failure) => (
+          <li key={failure.id}>
+            {failure.title ? <span>{failure.title}</span> : null}
+            <span>{failure.id}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 async function copyMissingToFolder(archive: ConversationArchive, repository: ConversationRepository) {

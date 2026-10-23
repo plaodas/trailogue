@@ -1,62 +1,60 @@
 export const SIDEBAR_LIST_REQUEST = "trailogue:sidebar-list";
 
+export type SidebarConversation = {
+  id: string;
+  title: string;
+};
+
 const COPILOT_ORIGIN = "https://copilot.cloud.microsoft";
 const COPILOT_PREFIX = "/chat/conversation/";
-const CHATGPT_ORIGIN = "https://chatgpt.com";
-const CHATGPT_PREFIX = "/c/";
-const CHATGPT_KEY_PREFIX = "chatgpt:conversation:";
 
 export function isSidebarListRequest(message: unknown): boolean {
   return isRecord(message) && message.type === SIDEBAR_LIST_REQUEST;
 }
 
-export function copilotConversationIds(document: Document): string[] {
+export function copilotConversationIds(document: Document): SidebarConversation[] {
   const marked = new Set<string>();
   for (const element of document.querySelectorAll("[data-chat-history-more-button-conversation-id]")) {
     const id = element.getAttribute("data-chat-history-more-button-conversation-id");
     if (id && isConversationId(id)) marked.add(id);
   }
-
-  const ids: string[] = [];
-  const seen = new Set<string>();
-  for (const anchor of document.querySelectorAll("a[href]")) {
-    const id = pathId(anchor.getAttribute("href") ?? "", COPILOT_ORIGIN, COPILOT_PREFIX);
-    if (!id || !marked.has(id) || seen.has(id)) continue;
-    seen.add(id);
-    ids.push(id);
-  }
-  return ids;
+  return sidebarConversations(document, COPILOT_ORIGIN, COPILOT_PREFIX, (id) => marked.has(id));
 }
 
 export function copilotConversationUrl(id: string): string {
   return `${COPILOT_ORIGIN}${COPILOT_PREFIX}${id}`;
 }
 
-export function chatgptConversationIds(document: Document): string[] {
-  const ids: string[] = [];
-  const seen = new Set<string>();
-  for (const anchor of document.querySelectorAll("a[href]")) {
-    const id = pathId(anchor.getAttribute("href") ?? "", CHATGPT_ORIGIN, CHATGPT_PREFIX);
-    if (!id || seen.has(id)) continue;
-    const key = anchor.closest("[data-sidebar-chatgpt-conversation-key]")
-      ?.getAttribute("data-sidebar-chatgpt-conversation-key");
-    if (key !== `${CHATGPT_KEY_PREFIX}${id}`) continue;
-    seen.add(id);
-    ids.push(id);
-  }
-  return ids;
-}
-
-export function chatgptConversationUrl(id: string): string {
-  return `${CHATGPT_ORIGIN}${CHATGPT_PREFIX}${id}`;
-}
-
 export function isConversationId(value: string): boolean {
   return value.length > 0 && !value.includes("/") && !value.includes("?") && !value.includes("#");
 }
 
-export function isConversationIdList(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string" && isConversationId(item));
+export function isSidebarConversationList(value: unknown): value is SidebarConversation[] {
+  return Array.isArray(value) && value.every(isSidebarConversation);
+}
+
+function sidebarConversations(
+  document: Document,
+  origin: string,
+  prefix: string,
+  accept: (id: string, anchor: Element) => boolean,
+): SidebarConversation[] {
+  const items: SidebarConversation[] = [];
+  const seen = new Set<string>();
+  for (const anchor of document.querySelectorAll("a[href]")) {
+    const id = pathId(anchor.getAttribute("href") ?? "", origin, prefix);
+    if (!id || seen.has(id) || !accept(id, anchor)) continue;
+    seen.add(id);
+    items.push({ id, title: anchor.textContent?.trim() ?? "" });
+  }
+  return items;
+}
+
+function isSidebarConversation(value: unknown): value is SidebarConversation {
+  return isRecord(value)
+    && typeof value.id === "string"
+    && isConversationId(value.id)
+    && typeof value.title === "string";
 }
 
 function pathId(href: string, origin: string, prefix: string): string | null {
