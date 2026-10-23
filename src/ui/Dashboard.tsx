@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { ArchiveConnection, ConversationArchive } from "../archive/fileSystemArchive";
 import type { DashboardPhase, DashboardStatus } from "../capture/status";
 import { transition, type SessionEvent, type SessionState } from "../capture/session";
 import { normalize } from "../domain/normalize";
@@ -14,10 +15,11 @@ const RETRY_WINDOW_MS = 10000;
 
 type Props = {
   repository: ConversationRepository;
+  archive: ConversationArchive;
   capture: CapturePort;
 };
 
-export function Dashboard({ repository, capture }: Props) {
+export function Dashboard({ repository, archive, capture }: Props) {
   const [session, setSession] = useState<SessionState>("idle");
   const [phase, setPhase] = useState<DashboardPhase | null>(null);
   const [records, setRecords] = useState<Conversation[]>([]);
@@ -28,6 +30,8 @@ export function Dashboard({ repository, capture }: Props) {
   const [changed, setChanged] = useState(false);
   const [reading, setReading] = useState<Conversation | null>(null);
   const [domWaitExpired, setDomWaitExpired] = useState(false);
+  const [archiveConnection, setArchiveConnection] = useState<ArchiveConnection | null>(null);
+  const [unreadable, setUnreadable] = useState(0);
 
   const sessionRef = useRef<SessionState>("idle");
   const tabIdRef = useRef<number | null>(null);
@@ -35,10 +39,12 @@ export function Dashboard({ repository, capture }: Props) {
   const seen = useRef("");
   const waitStarted = useRef<number | null>(null);
   const repositoryRef = useRef(repository);
+  const archiveRef = useRef(archive);
   const captureRef = useRef(capture);
   const onStatusRef = useRef<(status: DashboardStatus) => void>(() => {});
   const readTab = useRef<(tabId: number) => Promise<void>>(async () => {});
   repositoryRef.current = repository;
+  archiveRef.current = archive;
   captureRef.current = capture;
 
   function move(event: SessionEvent) {
@@ -49,7 +55,32 @@ export function Dashboard({ repository, capture }: Props) {
   }
 
   async function refresh() {
-    setRecords(await repositoryRef.current.list());
+    const currentArchive = archiveRef.current;
+    const currentRepository = repositoryRef.current;
+    let connection: ArchiveConnection;
+    try {
+      connection = await currentArchive.connection();
+    } catch {
+      connection = "missing";
+    }
+    setArchiveConnection(connection);
+    if (connection !== "ready") {
+      setUnreadable(0);
+      setRecords(await currentRepository.list());
+      return;
+    }
+    try {
+      await copyMissingToFolder(currentArchive, currentRepository);
+      const listing = await currentArchive.list();
+      for (const conversation of listing.conversations) {
+        await currentRepository.insert(conversation);
+      }
+      setUnreadable(listing.unreadable);
+      setRecords(listing.conversations);
+    } catch {
+      setUnreadable(0);
+      setRecords(await currentRepository.list());
+    }
   }
 
   readTab.current = async (tabId: number) => {
@@ -75,10 +106,24 @@ export function Dashboard({ repository, capture }: Props) {
       capturedAt: "1970-01-01T00:00:00.000Z",
     });
     if (current !== attempt.current || sessionRef.current !== "inspecting") return;
-    const [stored, all] = await Promise.all([
-      repositoryRef.current.findByHash(normalized.contentHash),
-      repositoryRef.current.list(),
-    ]);
+    const fromDexie = await repositoryRef.current.findByHash(normalized.contentHash);
+    const cached = await repositoryRef.current.list();
+    let stored = fromDexie;
+    let all = cached;
+    try {
+      if ((await archiveRef.current.connection()) === "ready") {
+        const [fromArchive, listing] = await Promise.all([
+          archiveRef.current.findByHash(normalized.contentHash),
+          archiveRef.current.list(),
+        ]);
+        stored = fromArchive ?? fromDexie;
+        all = mergeConversations(listing.conversations, cached);
+        setUnreadable(listing.unreadable);
+      }
+    } catch {
+      stored = fromDexie;
+      all = cached;
+    }
     if (current !== attempt.current || sessionRef.current !== "inspecting") return;
     setRecords(all);
     setChanged(
@@ -128,7 +173,7 @@ export function Dashboard({ repository, capture }: Props) {
 
   useEffect(() => {
     void refresh();
-  }, [repository]);
+  }, [repository, archive]);
 
   useEffect(() => {
     let alive = true;
@@ -191,18 +236,31 @@ export function Dashboard({ repository, capture }: Props) {
     if (!raw || live() !== "preview") return;
     move({ type: "save" });
     try {
+      if ((await archiveRef.current.connection()) !== "ready") {
+        const opened = await archiveRef.current.openFolder();
+        if (opened !== "ready") throw new Error("archive unavailable");
+      }
+      if (live() !== "saving") return;
+      await copyMissingToFolder(archiveRef.current, repositoryRef.current);
+      if (live() !== "saving") return;
       const conversation = await normalize(captureOf(raw), {
         id: crypto.randomUUID(),
         capturedAt: new Date().toISOString(),
       });
-      const stored = await repositoryRef.current.insert(conversation);
       if (live() !== "saving") return;
-      const all = await repositoryRef.current.list();
+      await archiveRef.current.write(conversation);
+      const onDisk = await archiveRef.current.findByHash(conversation.contentHash);
+      if (!onDisk) throw new Error("archive missing");
+      await repositoryRef.current.insert(onDisk);
       if (live() !== "saving") return;
-      setRecords(all);
-      setDraft(stored);
+      const listing = await archiveRef.current.list();
+      if (live() !== "saving") return;
+      setRecords(listing.conversations);
+      setUnreadable(listing.unreadable);
+      setArchiveConnection("ready");
+      setDraft(onDisk);
       setSaveFailed(false);
-      setReading(stored);
+      setReading(onDisk);
       move({ type: "stored" });
     } catch {
       if (live() !== "saving") return;
@@ -232,9 +290,19 @@ export function Dashboard({ repository, capture }: Props) {
     void refresh();
   }
 
+  async function openArchiveFolder() {
+    try {
+      await archiveRef.current.openFolder();
+    } catch {
+      // フォルダを開けないときも、作業用の一覧は残す。
+    }
+    await refresh();
+  }
+
   async function openExisting() {
     if (!existing || sessionRef.current !== "duplicate") return;
     const stored = await repositoryRef.current.findById(existing.id);
+    if (!stored) await repositoryRef.current.insert(existing);
     if (sessionRef.current !== "duplicate") return;
     setReading(stored ?? existing);
     move({ type: "open_existing" });
@@ -252,6 +320,11 @@ export function Dashboard({ repository, capture }: Props) {
   }
 
   async function openRecord(id: string) {
+    const known = records.find((record) => record.id === id);
+    if (known) {
+      setReading(known);
+      return;
+    }
     const stored = await repositoryRef.current.findById(id);
     if (stored) setReading(stored);
   }
@@ -285,7 +358,13 @@ export function Dashboard({ repository, capture }: Props) {
       ) : reading ? (
         <Reader conversation={reading} onBack={() => setReading(null)} />
       ) : (
-        <RecordList records={records} onOpen={(id) => void openRecord(id)} />
+        <RecordList
+          records={records}
+          connection={archiveConnection}
+          unreadable={unreadable}
+          onOpen={(id) => void openRecord(id)}
+          onOpenFolder={() => void openArchiveFolder()}
+        />
       )}
     </main>
   );
@@ -531,14 +610,33 @@ function ThoughtPath({ conversation }: { conversation: Conversation }) {
 
 function RecordList({
   records,
+  connection,
+  unreadable,
   onOpen,
+  onOpenFolder,
 }: {
   records: Conversation[];
+  connection: ArchiveConnection | null;
+  unreadable: number;
   onOpen: (id: string) => void;
+  onOpenFolder: () => void;
 }) {
   return (
     <section>
       <h2>保存した会話</h2>
+      {connection === "missing" ? (
+        <>
+          <p>{copy.folderMissing}</p>
+          <button type="button" onClick={onOpenFolder}>{copy.chooseFolder}</button>
+        </>
+      ) : null}
+      {connection === "needs_permission" ? (
+        <>
+          <p>{copy.folderClosed}</p>
+          <button type="button" onClick={onOpenFolder}>{copy.reopenFolder}</button>
+        </>
+      ) : null}
+      {unreadable > 0 ? <p className="warning">{copy.unreadable(unreadable)}</p> : null}
       {records.length === 0 ? <p>保存した会話はまだありません。</p> : null}
       <ul>
         {records.map((record) => (
@@ -554,6 +652,22 @@ function RecordList({
       </ul>
     </section>
   );
+}
+
+async function copyMissingToFolder(archive: ConversationArchive, repository: ConversationRepository) {
+  const listing = await archive.list();
+  const present = new Set(listing.conversations.map((conversation) => conversation.contentHash));
+  const stored = await repository.list();
+  for (const conversation of stored) {
+    if (!present.has(conversation.contentHash)) await archive.write(conversation);
+  }
+}
+
+function mergeConversations(files: Conversation[], cached: Conversation[]): Conversation[] {
+  const byHash = new Map<string, Conversation>();
+  for (const conversation of cached) byHash.set(conversation.contentHash, conversation);
+  for (const conversation of files) byHash.set(conversation.contentHash, conversation);
+  return [...byHash.values()].sort((left, right) => right.capturedAt.localeCompare(left.capturedAt));
 }
 
 function roleLabel(provider: ProviderId, role: MessageRole): string {

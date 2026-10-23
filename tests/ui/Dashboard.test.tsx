@@ -1,9 +1,16 @@
 import "fake-indexeddb/auto";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DASHBOARD_STATUS, type DashboardStatus } from "../../src/capture/status";
 import { normalize } from "../../src/domain/normalize";
 import type { RawCapture, RawMessage } from "../../src/domain/types";
+import {
+  findConversationFile,
+  listConversationFiles,
+  writeConversationFile,
+  type ArchiveDirectory,
+} from "../../src/archive/conversationFile";
+import type { ArchiveConnection, ConversationArchive } from "../../src/archive/fileSystemArchive";
 import { openDatabase, type TrailogueDatabase } from "../../src/storage/db";
 import { createRepository, type ConversationRepository } from "../../src/storage/repository";
 import type { CapturePort, CaptureRead } from "../../src/ui/capturePort";
@@ -22,7 +29,7 @@ describe("Dashboard", () => {
   it("shows the full transcript in document order", async () => {
     const repository = createTestRepository();
     const port = createPort(async () => ({ ok: true, capture: sampleCapture() }));
-    render(<Dashboard repository={repository} capture={port.port} />);
+    renderDashboard(repository, port.port);
     port.emit(readyStatus());
 
     expect(await screen.findByText("発言の全文プレビュー")).toBeTruthy();
@@ -40,7 +47,7 @@ describe("Dashboard", () => {
     });
     await repository.insert(existing);
     const port = createPort(async () => ({ ok: true, capture: sampleCapture() }));
-    render(<Dashboard repository={repository} capture={port.port} />);
+    renderDashboard(repository, port.port);
     port.emit(readyStatus());
 
     expect(await screen.findByText("同じ軌跡は保存済みであり、既存の記録へ移れる")).toBeTruthy();
@@ -54,7 +61,7 @@ describe("Dashboard", () => {
   it("shows the saved original text from the list", async () => {
     const repository = createTestRepository();
     const port = createPort(async () => ({ ok: true, capture: sampleCapture() }));
-    render(<Dashboard repository={repository} capture={port.port} />);
+    renderDashboard(repository, port.port);
     port.emit(readyStatus());
     fireEvent.click(await screen.findByRole("button", { name: "保存" }));
     fireEvent.click(await screen.findByRole("button", { name: "一覧へ戻る" }));
@@ -77,7 +84,7 @@ describe("Dashboard", () => {
     const repository = createTestRepository();
     const downloads = captureDownloads();
     const port = createPort(async () => ({ ok: true, capture: sampleCapture() }));
-    render(<Dashboard repository={repository} capture={port.port} />);
+    renderDashboard(repository, port.port);
     port.emit(readyStatus());
     fireEvent.click(await screen.findByRole("button", { name: "保存" }));
     expect(await screen.findByRole("button", { name: "原文" })).toBeTruthy();
@@ -94,14 +101,13 @@ describe("Dashboard", () => {
 
   it("keeps the preview text when saving fails", async () => {
     const repository = createTestRepository();
-    const failing: ConversationRepository = {
-      ...repository,
-      insert: async () => {
-        throw new Error("disk");
-      },
+    const insert = vi.spyOn(repository, "insert");
+    const memory = createMemoryArchive();
+    memory.archive.write = async () => {
+      throw new Error("disk");
     };
     const port = createPort(async () => ({ ok: true, capture: sampleCapture() }));
-    render(<Dashboard repository={failing} capture={port.port} />);
+    renderDashboard(repository, port.port, memory.archive);
     port.emit(readyStatus());
     fireEvent.click(await screen.findByRole("button", { name: "保存" }));
 
@@ -117,7 +123,75 @@ describe("Dashboard", () => {
     expect(markdown).toContain("一行目\n二行目の全文");
     expect(markdown).toContain("- Captured: \n");
     expect(markdown).not.toContain("1970-01-01");
+    expect(insert).not.toHaveBeenCalled();
     expect(await repository.list()).toHaveLength(0);
+  });
+
+  it("treats a folder file as the saved record when IndexedDB is empty", async () => {
+    const repository = createTestRepository();
+    const memory = createMemoryArchive();
+    const existing = await normalize(sampleCapture(), {
+      id: "from-folder",
+      capturedAt: "2026-01-01T00:00:00.000Z",
+    });
+    await memory.archive.write(existing);
+    const port = createPort(async () => ({ ok: true, capture: sampleCapture() }));
+    renderDashboard(repository, port.port, memory.archive);
+    port.emit(readyStatus());
+
+    expect(await screen.findByText("同じ軌跡は保存済みであり、既存の記録へ移れる")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "既存を開く" }));
+    expect(await screen.findByRole("heading", { name: "経路の題" })).toBeTruthy();
+    expect(messageBodies()).toEqual(["初めの問い", "一行目\n二行目の全文", ""]);
+  });
+
+  it("restores folder files into an empty working copy", async () => {
+    const repository = createTestRepository();
+    const memory = createMemoryArchive();
+    const existing = await normalize(sampleCapture(), {
+      id: "from-folder",
+      capturedAt: "2026-01-01T00:00:00.000Z",
+    });
+    await memory.archive.write(existing);
+    memory.disconnect();
+    const port = createPort(async () => ({ ok: true, capture: sampleCapture() }));
+    renderDashboard(repository, port.port, memory.archive);
+
+    expect(await screen.findByText("記録フォルダが未選択です。この一覧はブラウザの中にあります。")).toBeTruthy();
+    expect(await repository.list()).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "記録フォルダを選ぶ" }));
+
+    const row = await screen.findByRole("button", { name: /経路の題/ });
+    expect(row.textContent).toContain("3件");
+    fireEvent.click(row);
+    expect(messageBodies()).toEqual(["初めの問い", "一行目\n二行目の全文", ""]);
+    expect(await repository.list()).toHaveLength(1);
+    expect((await repository.list())[0]?.id).toBe("from-folder");
+  });
+
+  it("writes working copies that are missing from the folder", async () => {
+    const repository = createTestRepository();
+    const existing = await normalize(sampleCapture(), {
+      id: "cached",
+      capturedAt: "2026-01-01T00:00:00.000Z",
+    });
+    await repository.insert(existing);
+    const memory = createMemoryArchive("missing");
+    const port = createPort(async () => ({ ok: true, capture: sampleCapture() }));
+    renderDashboard(repository, port.port, memory.archive);
+
+    fireEvent.click(await screen.findByRole("button", { name: "記録フォルダを選ぶ" }));
+    await waitFor(async () => {
+      const listing = await memory.archive.list();
+      expect(listing.conversations.map((conversation) => conversation.id)).toEqual(["cached"]);
+    });
+    const listing = await memory.archive.list();
+    expect(listing.conversations.map((conversation) => conversation.id)).toEqual(["cached"]);
+    expect(listing.conversations[0]?.messages.map((message) => message.content)).toEqual([
+      "初めの問い",
+      "一行目\n二行目の全文",
+      "",
+    ]);
   });
 
   it("retries a loading page for about 10 seconds and then waits", async () => {
@@ -125,7 +199,7 @@ describe("Dashboard", () => {
     const repository = createTestRepository();
     const read = vi.fn(async (): Promise<CaptureRead> => ({ ok: false, code: "not_ready" }));
     const port = createPort(read);
-    render(<Dashboard repository={repository} capture={port.port} />);
+    renderDashboard(repository, port.port);
     await act(async () => {
       port.emit(readyStatus());
     });
@@ -147,6 +221,57 @@ describe("Dashboard", () => {
     expect(read.mock.calls.length).toBe(5);
   });
 });
+
+function renderDashboard(
+  repository: ConversationRepository,
+  capture: CapturePort,
+  archive: ConversationArchive = createMemoryArchive().archive,
+) {
+  render(<Dashboard repository={repository} archive={archive} capture={capture} />);
+}
+
+function createMemoryArchive(initial: ArchiveConnection = "ready") {
+  let connection = initial;
+  const files = new Map<string, string>();
+  const directory: ArchiveDirectory = {
+    async read(name) {
+      return files.get(name) ?? null;
+    },
+    async write(name, contents) {
+      files.set(name, contents);
+    },
+    async list() {
+      return [...files].map(([name, text]) => ({ name, text }));
+    },
+  };
+  const archive: ConversationArchive = {
+    async connection() {
+      return connection;
+    },
+    async openFolder() {
+      connection = "ready";
+      return "ready";
+    },
+    async findByHash(contentHash) {
+      if (connection !== "ready") throw new Error("archive unavailable");
+      return findConversationFile(directory, contentHash);
+    },
+    async write(conversation) {
+      if (connection !== "ready") throw new Error("archive unavailable");
+      await writeConversationFile(directory, conversation);
+    },
+    async list() {
+      if (connection !== "ready") throw new Error("archive unavailable");
+      return listConversationFiles(directory);
+    },
+  };
+  return {
+    archive,
+    disconnect() {
+      connection = "missing";
+    },
+  };
+}
 
 function createTestRepository(): ConversationRepository {
   const db = openDatabase(`trailogue-test-${crypto.randomUUID()}`);
