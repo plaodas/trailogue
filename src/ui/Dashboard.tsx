@@ -321,10 +321,14 @@ export function Dashboard({ repository, archive, capture, sidebar }: Props) {
     void readTab.current(id);
   }
 
-  function discard() {
-    if (sessionRef.current !== "preview") return;
+  function showList() {
+    const state = sessionRef.current;
+    if (state !== "inspecting" && state !== "preview" && state !== "duplicate") return;
+    attempt.current += 1;
     setDraft(null);
-    move({ type: "discard" });
+    setExisting(null);
+    setReading(null);
+    move({ type: "show_list" });
     void refresh();
   }
 
@@ -489,7 +493,7 @@ export function Dashboard({ repository, archive, capture, sidebar }: Props) {
           onExport={() => {
             if (draft) downloadMarkdown(draft, "");
           }}
-          onDiscard={discard}
+          onShowList={showList}
           onRetry={retryNow}
           onCancel={cancel}
           onDismiss={dismiss}
@@ -544,7 +548,7 @@ function CaptureView({
   domWaitExpired,
   onSave,
   onExport,
-  onDiscard,
+  onShowList,
   onRetry,
   onCancel,
   onDismiss,
@@ -560,7 +564,7 @@ function CaptureView({
   domWaitExpired: boolean;
   onSave: () => void;
   onExport: () => void;
-  onDiscard: () => void;
+  onShowList: () => void;
   onRetry: () => void;
   onCancel: () => void;
   onDismiss: () => void;
@@ -587,7 +591,7 @@ function CaptureView({
           domWaitExpired={domWaitExpired}
           onSave={onSave}
           onExport={onExport}
-          onDiscard={onDiscard}
+          onShowList={onShowList}
           onRetry={onRetry}
           onCancel={onCancel}
           onDismiss={onDismiss}
@@ -637,7 +641,7 @@ function StatusActions({
   domWaitExpired,
   onSave,
   onExport,
-  onDiscard,
+  onShowList,
   onRetry,
   onCancel,
   onDismiss,
@@ -648,12 +652,15 @@ function StatusActions({
   domWaitExpired: boolean;
   onSave: () => void;
   onExport: () => void;
-  onDiscard: () => void;
+  onShowList: () => void;
   onRetry: () => void;
   onCancel: () => void;
   onDismiss: () => void;
   onOpenExisting: () => void;
 }) {
+  if (session === "inspecting") {
+    return <button type="button" onClick={onShowList}>一覧へ戻る</button>;
+  }
   if (session === "unsupported") {
     return <button type="button" onClick={onDismiss}>一覧へ戻る</button>;
   }
@@ -680,7 +687,12 @@ function StatusActions({
     return <button type="button" onClick={onDismiss}>最初からやり直す</button>;
   }
   if (session === "duplicate") {
-    return <button type="button" onClick={onOpenExisting}>既存を開く</button>;
+    return (
+      <>
+        <button type="button" onClick={onOpenExisting}>既存を開く</button>
+        <button type="button" onClick={onShowList}>一覧へ戻る</button>
+      </>
+    );
   }
   if (session === "preview" && saveFailed) {
     return (
@@ -690,13 +702,16 @@ function StatusActions({
       </>
     );
   }
-  if (session === "preview" || session === "saving") {
+  if (session === "preview") {
     return (
       <>
-        <button type="button" onClick={onSave} disabled={session === "saving"}>保存</button>
-        <button type="button" onClick={onDiscard} disabled={session === "saving"}>破棄</button>
+        <button type="button" onClick={onSave}>保存</button>
+        <button type="button" onClick={onShowList}>一覧へ戻る</button>
       </>
     );
+  }
+  if (session === "saving") {
+    return <button type="button" onClick={onSave} disabled>保存</button>;
   }
   return null;
 }

@@ -59,6 +59,64 @@ describe("Dashboard", () => {
     expect(await repository.list()).toHaveLength(1);
   });
 
+  it("returns to the saved list from a preview without opening the original", async () => {
+    const repository = createTestRepository();
+    const port = createPort(async () => ({ ok: true, capture: sampleCapture() }));
+    renderDashboard(repository, port.port);
+    port.emit(readyStatus());
+
+    expect(await screen.findByText("発言の全文プレビュー")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "一覧へ戻る" }));
+
+    expect(await screen.findByRole("heading", { name: "保存した会話" })).toBeTruthy();
+    expect(screen.queryByText("発言の全文プレビュー")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "経路の題" })).toBeNull();
+    expect(await repository.list()).toHaveLength(0);
+  });
+
+  it("returns to the saved list from a duplicate without opening the record", async () => {
+    const repository = createTestRepository();
+    const existing = await normalize(sampleCapture(), {
+      id: "existing",
+      capturedAt: "2026-01-01T00:00:00.000Z",
+    });
+    await repository.insert(existing);
+    const port = createPort(async () => ({ ok: true, capture: sampleCapture() }));
+    renderDashboard(repository, port.port);
+    port.emit(readyStatus());
+
+    expect(await screen.findByText("同じ軌跡は保存済みであり、既存の記録へ移れる")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "一覧へ戻る" }));
+
+    expect(await screen.findByRole("heading", { name: "保存した会話" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "経路の題" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "原文" })).toBeNull();
+    expect(screen.getByRole("button", { name: /経路の題/ })).toBeTruthy();
+  });
+
+  it("returns to the list before a preview can replace it", async () => {
+    const repository = createTestRepository();
+    let finish: (result: CaptureRead) => void = () => {};
+    const port = createPort(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    renderDashboard(repository, port.port);
+    port.emit(readyStatus());
+
+    expect(await screen.findByText("会話を取得しています")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "一覧へ戻る" }));
+    expect(await screen.findByRole("heading", { name: "保存した会話" })).toBeTruthy();
+
+    await act(async () => {
+      finish({ ok: true, capture: sampleCapture() });
+    });
+    expect(screen.queryByText("発言の全文プレビュー")).toBeNull();
+    expect(screen.getByRole("heading", { name: "保存した会話" })).toBeTruthy();
+  });
+
   it("shows the saved original text from the list", async () => {
     const repository = createTestRepository();
     const port = createPort(async () => ({ ok: true, capture: sampleCapture() }));
@@ -116,6 +174,7 @@ describe("Dashboard", () => {
     expect(messageBodies()).toEqual(["初めの問い", "一行目\n二行目の全文", ""]);
     expect(screen.getByRole("button", { name: "保存を再試行" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "破棄" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "一覧へ戻る" })).toBeNull();
     expect(screen.queryByRole("button", { name: "思考経路" })).toBeNull();
     const downloads = captureDownloads();
     fireEvent.click(screen.getByRole("button", { name: "Markdownを書き出す" }));

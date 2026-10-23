@@ -84,9 +84,9 @@ MVPの思考経路は、保存済み発言を順序どおり縦に並べたも�
 | 対象外ページ | CopilotまたはChatGPTの対応会話タブで実行する | 会話を開いて再実行 |
 | サインイン待ち | 現在のタブでサインインし、会話を表示する | 再取得、中止 |
 | 会話の描画待ち | 現在のタブで会話の表示を待っている | 最初の10秒は自動再試行。その後は再取得、中止 |
-| 取得成功 | 発言の全文プレビュー | 保存、破棄 |
-| 同一内容 | 同じ軌跡は保存済みであり、既存の記録へ移れる | 既存を開く |
-| 内容が変化 | 同じ会話の別の記録として残せる。以前の記録は削除しない | 保存、破棄 |
+| 取得成功 | 発言の全文プレビュー | 保存、一覧へ戻る |
+| 同一内容 | 同じ軌跡は保存済みであり、既存の記録へ移れる | 既存を開く、一覧へ戻る |
+| 内容が変化 | 同じ会話の別の記録として残せる。以前の記録は削除しない | 保存、一覧へ戻る |
 | 会話ゼロ | 会話を読めなかったので保存していない | 再取得、中止 |
 | 会話不完全 | 仮想化などにより全発言を確認できず、保存していない | ページを再表示して再取得 |
 | 構造不明 | この版のadapterでは会話ページの構造を読めなかった | 再取得、中止 |
@@ -120,9 +120,12 @@ stateDiagram-v2
     Failed --> Idle: dismiss
     Unsupported --> Idle: dismiss
     Inspecting --> Preview: captured
+    Inspecting --> Idle: show_list
     Preview --> Duplicate: same_hash
     Preview --> Saving: save
     Preview --> Idle: discard
+    Preview --> Idle: show_list
+    Duplicate --> Idle: show_list
     Saving --> Saved: stored
     Saving --> Preview: store_failed
     Duplicate --> Saved: open_existing
