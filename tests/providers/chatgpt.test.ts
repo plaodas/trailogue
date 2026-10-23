@@ -23,7 +23,7 @@ describe("chatgpt adapter", () => {
         sourceId: "share-1",
         sourceKind: "shared",
         title: "理由の設定",
-        parserVersion: "chatgpt-2",
+        parserVersion: "chatgpt-3",
         messages: [
           { ordinal: 0, role: "user", content: "問い", providerMessageId: "u1" },
           { ordinal: 1, role: "assistant", content: "答え\n続き", providerMessageId: "a1" },
@@ -57,6 +57,20 @@ describe("chatgpt adapter", () => {
     expect(assistant).toContain("git worktree");
     expect(assistant).not.toContain("コピー");
     expect(assistant).not.toContain("ChatGPT の発言");
+  });
+
+  it("waits while the conversation shell has no turns yet", () => {
+    expect(parse(load("conversation-pending.html"), conversationUrl)).toEqual({
+      ok: false,
+      code: "not_ready",
+    });
+  });
+
+  it("does not treat a shell for another conversation as this page", () => {
+    expect(parse(load("conversation-pending.html"), "https://chatgpt.com/c/other")).toEqual({
+      ok: false,
+      code: "unrecognized_structure",
+    });
   });
 
   it("waits instead of saving an assistant turn whose body is still empty", () => {
