@@ -21,6 +21,20 @@ export const copy = {
   reloading: "ページを読み直して取得しています",
   capturing: "会話を取得しています",
   emptyMessages: (count: number) => `空の本文が${count}件あります。`,
+  batchDone: "サイドバーの会話を取り込みました",
+  batchCancelled: "取り込みを止めています",
+  batchStart: "サイドバーの会話を順に取り込む",
+  batchResume: "続きから",
+  batchBack: "一覧へ戻る",
+  batchPaused: "連続して構造を読めなかったので止めています",
+  batchTabClosed: "会話タブが閉じたので止めています",
+  batchEmpty: "サイドバーに会話の識別子がありません。Copilotの会話を開いてから実行する",
+  batchNoTab: "Copilotの会話タブでサイドバーを開いてから実行する",
+  batchFolder: "記録フォルダを選ぶと取り込みを始められます",
+  batchProgress: (done: number, total: number) => `${done}/${total}`,
+  batchStored: (count: number) => `保存 ${count}`,
+  batchSkipped: (count: number) => `同じ内容 ${count}`,
+  batchFailed: (count: number) => `失敗 ${count}`,
 } as const;
 
 export function failureCopy(code: CaptureFailureCode | null): string {
