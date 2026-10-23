@@ -7,7 +7,7 @@ describe("provider adapters", () => {
   it("does not treat an allowed page as a captured conversation", () => {
     const page = document.implementation.createHTMLDocument("ChatGPT");
 
-    expect(copilotVersion).toBe("copilot-1");
+    expect(copilotVersion).toBe("copilot-2");
     expect(chatgptVersion).toBe("chatgpt-1");
     expect(parseCopilot(page, "https://copilot.cloud.microsoft/chat/share/token")).toEqual({
       ok: false,
