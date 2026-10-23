@@ -1,6 +1,12 @@
 # Trailogue
 
-このビルドは、現在のタブから会話を読むadapterまでを含む。拡張機能のボタンは取得要求を送り、ダッシュボードを開く。取得結果の保存、プレビュー、思考経路、Markdownのダウンロードはまだない。
+このビルドは、現在のタブの会話を読み、全文プレビューとローカル保存と原文の再表示までを行う。思考経路とMarkdownのダウンロードはまだない。
+
+## 使い方
+
+保存したいCopilotまたはChatGPTの会話を開き、そのタブで拡張機能のボタンを押す。操作はどちらのページでも同じである。ボタンは同じURLを読み直してから取得する。読み直すと、入力中の文とスクロール位置は消える。popupはない。
+
+`npm run build` のあと、EdgeまたはChromeの拡張機能ページで `.output/chrome-mv3` を読み込む。実ページでのボタン確認は、この読み込みのあとに行う。
 
 ## 開発
 
@@ -31,12 +37,12 @@ adapterが依存している形式は次です。fixtureは実ページの保存
 - ChatGPT共有会話: `script#__WEB_MOBILE_DATA__` の `conversation.messages`。`role` は `user` と `assistant`、本文は `content`。
 - ChatGPT通常会話: `data-chatgpt-search-message-ids`、見出し「あなたの発言:」、`data-conversation-role="assistant"`。ユーザー本文は `data-search-result-target`、assistant本文は `data-markdown-text-style="assistant-message"`。
 
-Copilotの content script は `document_start` で hydration script のテキストを保持する。解釈と応答は、拡張機能のボタンによる取得要求のときだけ行う。
+Copilotの content script は `document_start` で hydration script のテキストを保持する。解釈と応答は、拡張機能のボタンによる取得要求のときだけ行う。ボタンは取得の前に同じURLを読み直すので、保持するのは読み直した最初のHTMLである。
 
 ## 未確認のprovider依存
 
 - CopilotとChatGPTのサインイン画面。`login_required` 用のセレクタは置いていない。
-- ChatGPT通常会話で長い会話が仮想化されたときの全件の取り方。`data-virtualized-turn-content` があるページは `incomplete_conversation` になる。
-- Copilotのアプリ内遷移で、新しい hydration script がDocumentへ入らない場合。そのときは保持分を別会話へ流用せず、`incomplete_conversation` になる。会話のURLを読み直すと、最初のHTMLから保持できる。
+- ChatGPT通常会話で長い会話が仮想化されたときの全件の取り方。`data-virtualized-turn-content` があるページは、同じURLを読み直しても `incomplete_conversation` になる。
+- 読み直したCopilotの最初のHTMLに hydration script が無い場合。そのときは `incomplete_conversation` になる。
 
 実ページの保存HTMLは、トークンや他の履歴を含むため fixture にしていない。

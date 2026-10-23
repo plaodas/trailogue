@@ -1,0 +1,51 @@
+body {
+  margin: 0;
+  background: #f7f4ee;
+  color: #1c1917;
+  font-family: "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+
+main {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+button,
+.record {
+  font: inherit;
+}
+
+.record,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: baseline;
+}
+
+.record {
+  width: 100%;
+  text-align: left;
+  padding: 0.75rem 0;
+  border: 0;
+  border-bottom: 1px solid #d6d3d1;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+pre.message {
+  white-space: pre-wrap;
+  font-family: inherit;
+  margin: 0 0 1rem;
+}
+
+.actions {
+  margin: 1rem 0;
+}
+
+.warning {
+  color: #9a3412;
+}
