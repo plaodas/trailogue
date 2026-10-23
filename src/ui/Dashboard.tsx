@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { ArchiveConnection, ConversationArchive } from "../archive/fileSystemArchive";
+import {
+  cancelBatch,
+  idleBatch,
+  resumeBatch,
+  startBatch,
+  type BatchState,
+} from "../capture/batch";
+import { runBatch } from "../capture/runBatch";
 import type { DashboardPhase, DashboardStatus } from "../capture/status";
 import { transition, type SessionEvent, type SessionState } from "../capture/session";
 import { normalize } from "../domain/normalize";
@@ -9,6 +17,8 @@ import type { ConversationRepository } from "../storage/repository";
 import type { CapturePort, CaptureRead } from "./capturePort";
 import { copy, failureCopy } from "./copy";
 import { downloadMarkdown } from "./downloadMarkdown";
+import type { SidebarBatchPort } from "./extensionBatch";
+import { storeCapturedConversation } from "./storeCapture";
 
 const RETRY_INTERVAL_MS = 2000;
 const RETRY_WINDOW_MS = 10000;
@@ -17,9 +27,10 @@ type Props = {
   repository: ConversationRepository;
   archive: ConversationArchive;
   capture: CapturePort;
+  sidebar?: SidebarBatchPort;
 };
 
-export function Dashboard({ repository, archive, capture }: Props) {
+export function Dashboard({ repository, archive, capture, sidebar }: Props) {
   const [session, setSession] = useState<SessionState>("idle");
   const [phase, setPhase] = useState<DashboardPhase | null>(null);
   const [records, setRecords] = useState<Conversation[]>([]);
@@ -32,6 +43,8 @@ export function Dashboard({ repository, archive, capture }: Props) {
   const [domWaitExpired, setDomWaitExpired] = useState(false);
   const [archiveConnection, setArchiveConnection] = useState<ArchiveConnection | null>(null);
   const [unreadable, setUnreadable] = useState(0);
+  const [batch, setBatch] = useState<BatchState>(idleBatch());
+  const [batchMessage, setBatchMessage] = useState<string | null>(null);
 
   const sessionRef = useRef<SessionState>("idle");
   const tabIdRef = useRef<number | null>(null);
@@ -41,11 +54,17 @@ export function Dashboard({ repository, archive, capture }: Props) {
   const repositoryRef = useRef(repository);
   const archiveRef = useRef(archive);
   const captureRef = useRef(capture);
+  const batchRef = useRef(batch);
+  const batchRun = useRef(0);
+  const batchPhase = useRef(batch.phase);
+  const batchTab = useRef<number | null>(null);
+  const refreshRun = useRef(0);
   const onStatusRef = useRef<(status: DashboardStatus) => void>(() => {});
   const readTab = useRef<(tabId: number) => Promise<void>>(async () => {});
   repositoryRef.current = repository;
   archiveRef.current = archive;
   captureRef.current = capture;
+  batchRef.current = batch;
 
   function move(event: SessionEvent) {
     const next = transition(sessionRef.current, event);
@@ -55,31 +74,43 @@ export function Dashboard({ repository, archive, capture }: Props) {
   }
 
   async function refresh() {
+    const id = ++refreshRun.current;
     const currentArchive = archiveRef.current;
     const currentRepository = repositoryRef.current;
-    let connection: ArchiveConnection;
     try {
-      connection = await currentArchive.connection();
-    } catch {
-      connection = "missing";
-    }
-    setArchiveConnection(connection);
-    if (connection !== "ready") {
-      setUnreadable(0);
-      setRecords(await currentRepository.list());
-      return;
-    }
-    try {
+      let connection: ArchiveConnection;
+      try {
+        connection = await currentArchive.connection();
+      } catch {
+        connection = "missing";
+      }
+      if (id !== refreshRun.current) return;
+      setArchiveConnection(connection);
+      if (connection !== "ready") {
+        const stored = await currentRepository.list();
+        if (id !== refreshRun.current) return;
+        setUnreadable(0);
+        setRecords(stored);
+        return;
+      }
       await copyMissingToFolder(currentArchive, currentRepository);
+      if (id !== refreshRun.current) return;
       const listing = await currentArchive.list();
+      if (id !== refreshRun.current) return;
       for (const conversation of listing.conversations) {
         await currentRepository.insert(conversation);
+        if (id !== refreshRun.current) return;
       }
       setUnreadable(listing.unreadable);
       setRecords(listing.conversations);
     } catch {
-      setUnreadable(0);
-      setRecords(await currentRepository.list());
+      if (id !== refreshRun.current) return;
+      try {
+        setUnreadable(0);
+        setRecords(await currentRepository.list());
+      } catch {
+        return;
+      }
     }
   }
 
@@ -141,6 +172,7 @@ export function Dashboard({ repository, archive, capture }: Props) {
   };
 
   onStatusRef.current = (status) => {
+    if (batchPhase.current === "running" || batchPhase.current === "paused") return;
     if (status.generation === 0) return;
     const key = `${status.generation}:${status.phase}`;
     if (seen.current === key) return;
@@ -174,6 +206,12 @@ export function Dashboard({ repository, archive, capture }: Props) {
   useEffect(() => {
     void refresh();
   }, [repository, archive]);
+
+  useEffect(() => {
+    return () => {
+      batchRun.current += 1;
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -319,6 +357,99 @@ export function Dashboard({ repository, archive, capture }: Props) {
     void refresh();
   }
 
+  function publishBatch(next: BatchState) {
+    batchRef.current = next;
+    batchPhase.current = next.phase;
+    setBatch(next);
+  }
+
+  async function startSidebarBatch(continued: boolean) {
+    const port = sidebar;
+    if (!port) return;
+    const id = ++batchRun.current;
+    setBatchMessage(null);
+    try {
+      if ((await archiveRef.current.connection()) !== "ready") {
+        const opened = await archiveRef.current.openFolder();
+        if (opened !== "ready") {
+          setBatchMessage(copy.batchFolder);
+          return;
+        }
+      }
+    } catch {
+      setBatchMessage(copy.batchFolder);
+      return;
+    }
+    if (id !== batchRun.current) return;
+
+    let state = continued ? resumeBatch(batchRef.current) : idleBatch();
+    if (!continued) {
+      const tabId = await port.findTab();
+      if (id !== batchRun.current) return;
+      if (tabId === null) {
+        setBatchMessage(copy.batchNoTab);
+        return;
+      }
+      const listed = await port.listIds(tabId);
+      if (id !== batchRun.current) return;
+      if (listed === "closed") {
+        setBatchMessage(copy.batchNoTab);
+        return;
+      }
+      if (listed.length === 0) {
+        setBatchMessage(copy.batchEmpty);
+        return;
+      }
+      batchTab.current = tabId;
+      state = startBatch(listed);
+    }
+    if (state.phase !== "running" || batchTab.current === null) {
+      setBatchMessage(copy.batchEmpty);
+      return;
+    }
+    publishBatch(state);
+    const finished = await runBatch({
+      state,
+      cancelled: () => id !== batchRun.current,
+      onUpdate: (next) => {
+        if (id !== batchRun.current) return;
+        publishBatch(next);
+      },
+      driver: {
+        open: (conversationId) => port.open(batchTab.current ?? -1, conversationId),
+        read: () => captureRef.current.read(batchTab.current ?? -1),
+        save: (captured) =>
+          storeCapturedConversation(captured, archiveRef.current, repositoryRef.current),
+        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+        now: () => Date.now(),
+      },
+    });
+    if (id !== batchRun.current) {
+      await refresh();
+      return;
+    }
+    if (finished.phase === "done") {
+      setBatchMessage(batchSummary(finished));
+      publishBatch(idleBatch());
+      await refresh();
+      return;
+    }
+    publishBatch(finished);
+    await refresh();
+  }
+
+  function stopSidebarBatch() {
+    batchRun.current += 1;
+    publishBatch(cancelBatch(batchRef.current));
+  }
+
+  function leaveBatch() {
+    batchRun.current += 1;
+    setBatchMessage(batchSummary(batchRef.current));
+    publishBatch(idleBatch());
+    void refresh();
+  }
+
   async function openRecord(id: string) {
     const known = records.find((record) => record.id === id);
     if (known) {
@@ -329,13 +460,22 @@ export function Dashboard({ repository, archive, capture }: Props) {
     if (stored) setReading(stored);
   }
 
-  const busy = session !== "idle" && session !== "saved";
+  const batchVisible =
+    batch.phase === "running" || batch.phase === "paused" || batch.phase === "cancelled";
+  const busy = !batchVisible && session !== "idle" && session !== "saved";
   const emptyCount = draft?.messages.filter((message) => message.content.length === 0).length ?? 0;
 
   return (
     <main>
       <h1>Trailogue</h1>
-      {busy ? (
+      {batchVisible ? (
+        <BatchPanel
+          state={batch}
+          onCancel={stopSidebarBatch}
+          onResume={() => void startSidebarBatch(true)}
+          onBack={leaveBatch}
+        />
+      ) : busy ? (
         <CaptureView
           session={session}
           phase={phase}
@@ -364,6 +504,8 @@ export function Dashboard({ repository, archive, capture }: Props) {
           unreadable={unreadable}
           onOpen={(id) => void openRecord(id)}
           onOpenFolder={() => void openArchiveFolder()}
+          message={batchMessage}
+          onImport={sidebar ? () => void startSidebarBatch(false) : undefined}
         />
       )}
     </main>
@@ -614,16 +756,24 @@ function RecordList({
   unreadable,
   onOpen,
   onOpenFolder,
+  message,
+  onImport,
 }: {
   records: Conversation[];
   connection: ArchiveConnection | null;
   unreadable: number;
   onOpen: (id: string) => void;
   onOpenFolder: () => void;
+  message: string | null;
+  onImport?: () => void;
 }) {
   return (
     <section>
       <h2>保存した会話</h2>
+      {message ? <p>{message}</p> : null}
+      {onImport ? (
+        <button type="button" onClick={onImport}>{copy.batchStart}</button>
+      ) : null}
       {connection === "missing" ? (
         <>
           <p>{copy.folderMissing}</p>
@@ -652,6 +802,48 @@ function RecordList({
       </ul>
     </section>
   );
+}
+
+function BatchPanel({
+  state,
+  onCancel,
+  onResume,
+  onBack,
+}: {
+  state: BatchState;
+  onCancel: () => void;
+  onResume: () => void;
+  onBack: () => void;
+}) {
+  const pausedForStructure = state.phase === "paused" && state.unrecognizedStreak >= 3;
+  return (
+    <section>
+      <h2>サイドバーの会話</h2>
+      <p>{copy.batchProgress(state.cursor, state.ids.length)}</p>
+      <p>{copy.batchStored(state.stored)}</p>
+      <p>{copy.batchSkipped(state.skipped)}</p>
+      <p>{copy.batchFailed(state.failed)}</p>
+      {pausedForStructure ? <p>{copy.batchPaused}</p> : null}
+      {state.phase === "paused" && !pausedForStructure ? <p>{copy.batchTabClosed}</p> : null}
+      {state.phase === "cancelled" ? <p>{copy.batchCancelled}</p> : null}
+      <div className="actions">
+        {state.phase === "paused" ? (
+          <button type="button" onClick={onResume}>{copy.batchResume}</button>
+        ) : null}
+        {state.phase === "running" || state.phase === "paused" ? (
+          <button type="button" onClick={onCancel}>中止</button>
+        ) : null}
+        {state.phase === "cancelled" ? (
+          <button type="button" onClick={onBack}>{copy.batchBack}</button>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function batchSummary(state: BatchState): string {
+  const head = state.phase === "cancelled" ? copy.batchCancelled : copy.batchDone;
+  return `${head}。${copy.batchProgress(state.cursor, state.ids.length)}。${copy.batchStored(state.stored)}、${copy.batchSkipped(state.skipped)}、${copy.batchFailed(state.failed)}`;
 }
 
 async function copyMissingToFolder(archive: ConversationArchive, repository: ConversationRepository) {

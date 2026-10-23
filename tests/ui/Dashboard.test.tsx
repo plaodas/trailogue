@@ -14,6 +14,7 @@ import type { ArchiveConnection, ConversationArchive } from "../../src/archive/f
 import { openDatabase, type TrailogueDatabase } from "../../src/storage/db";
 import { createRepository, type ConversationRepository } from "../../src/storage/repository";
 import type { CapturePort, CaptureRead } from "../../src/ui/capturePort";
+import type { SidebarBatchPort } from "../../src/ui/extensionBatch";
 import { Dashboard } from "../../src/ui/Dashboard";
 
 const databases: TrailogueDatabase[] = [];
@@ -220,14 +221,56 @@ describe("Dashboard", () => {
     });
     expect(read.mock.calls.length).toBe(5);
   });
+
+  it("imports the sidebar list into the folder without opening a preview", async () => {
+    const repository = createTestRepository();
+    const memory = createMemoryArchive();
+    let current = "one";
+    const opened: string[] = [];
+    const capture = createPort(async () => ({
+      ok: true,
+      capture: {
+        ...sampleCapture(),
+        sourceId: current,
+        sourceUrl: `https://copilot.cloud.microsoft/chat/conversation/${current}`,
+        title: current,
+        messages: [{ ordinal: 0, role: "user", content: current, providerMessageId: current }],
+      },
+    }));
+    const batch: SidebarBatchPort = {
+      async findTab() {
+        return 4;
+      },
+      async listIds() {
+        return ["one", "two"];
+      },
+      async open(_tabId, id) {
+        opened.push(id);
+        current = id;
+        if (id === "one") capture.emit(readyStatus());
+        return "complete";
+      },
+    };
+    renderDashboard(repository, capture.port, memory.archive, batch);
+    fireEvent.click(await screen.findByRole("button", { name: "サイドバーの会話を順に取り込む" }));
+
+    expect(await screen.findByRole("button", { name: /one/ })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /two/ })).toBeTruthy();
+    expect(screen.getByText(/サイドバーの会話を取り込みました/)).toBeTruthy();
+    expect(screen.getByText(/保存 2/)).toBeTruthy();
+    expect(screen.queryByText("発言の全文プレビュー")).toBeNull();
+    expect(opened).toEqual(["one", "two"]);
+    expect(await repository.list()).toHaveLength(2);
+  });
 });
 
 function renderDashboard(
   repository: ConversationRepository,
   capture: CapturePort,
   archive: ConversationArchive = createMemoryArchive().archive,
+  batch?: SidebarBatchPort,
 ) {
-  render(<Dashboard repository={repository} archive={archive} capture={capture} />);
+  render(<Dashboard repository={repository} archive={archive} capture={capture} sidebar={batch} />);
 }
 
 function createMemoryArchive(initial: ArchiveConnection = "ready") {

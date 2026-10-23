@@ -1,6 +1,7 @@
 import { browser } from "wxt/browser";
 import { defineContentScript } from "wxt/utils/define-content-script";
 import { isCaptureRequest } from "../src/capture/request";
+import { copilotConversationIds, isSidebarListRequest } from "../src/capture/sidebar";
 import { parse } from "../src/providers/copilot/adapter";
 import {
   pagePath,
@@ -32,6 +33,10 @@ export default defineContentScript({
     observer.observe(root, { childList: true, subtree: true });
 
     browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      if (isSidebarListRequest(message)) {
+        sendResponse(copilotConversationIds(document));
+        return;
+      }
       if (!isCaptureRequest(message)) return;
       const path = pagePath(location.href);
       sendResponse(

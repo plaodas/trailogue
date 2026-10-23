@@ -80,6 +80,8 @@ src/
   capture/
     page.ts
     session.ts
+    batch.ts
+    sidebar.ts
   storage/
     db.ts
     repository.ts
@@ -94,7 +96,7 @@ tests/
   fixtures/chatgpt/
 ```
 
-content scriptの入口は薄く保つ。明示的な取得要求を受けたときだけ `parse(document, url)` を呼び、結果を返す。Copilotの content script はそれに加えて `document_start` で hydration script のテキストを保持する。保持は取得でも保存でもない。HTML解釈のテストは、この純粋関数へfixtureのDocumentを渡して行う。
+content scriptの入口は薄く保つ。明示的な取得要求を受けたときだけ `parse(document, url)` を呼び、結果を返す。Copilotの content script はそれに加えて `document_start` で hydration script のテキストを保持する。保持は取得でも保存でもない。サイドバーの一覧要求には、確認できた会話識別子だけを返し、本文は返さない。HTML解釈のテストは、この純粋関数へfixtureのDocumentを渡して行う。
 
 adapterの外へ出るものは `RawCapture` か失敗コードだけである。取得器は交換でき、保存、正規化、思考経路、MarkdownはproviderのDOMを知らない。既存の会話エクスポーターはForkせず、そのMarkdown変換、汎用セレクタ、部分取得の成功もこの境界へ入れない。進め方は [AGENTS.md](../AGENTS.md) に従う。
 
@@ -313,7 +315,7 @@ fixtureへはこの契約を再現する最小データだけを置く。convers
 
 一覧の各行は、タイトル、provider、取得日時、発言数を示す。同じ `sourceId` の記録が複数あれば、取得日時で区別する。
 
-取得セッションの分岐は `src/capture/session.ts` の純粋関数に置く。現在のタブへ取得要求を送る処理、ダッシュボードを開く処理、2秒間隔の再取得は、その関数の結果を実行する側へ分ける。
+取得セッションの分岐は `src/capture/session.ts` の純粋関数に置く。サイドバーの順次取り込みの進行は `src/capture/batch.ts` の純粋関数に置く。現在のタブへ取得要求を送る処理、ダッシュボードを開く処理、2秒間隔の再取得、1つのCopilotタブを識別子ごとに開く処理は、その関数の結果を実行する側へ分ける。一覧は開始時の文書から一度だけ読み、移動先のサイドバーは読まない。保存完了は、各会話のJSONがフォルダに書けたときである。
 
 ## 検証
 
