@@ -297,9 +297,7 @@ Copilotは通常会話と共有会話のどちらも、inline script の `window
 
 ChatGPT共有会話は `script#__WEB_MOBILE_DATA__` の `conversation.messages` を読む。各要素の `content`、`role`（`user` と `assistant` 以外は `unknown`）、`id`、タイトルの `conversation.title` を使う。`userMessageCount` がユーザー発言数と違うときは `incomplete_conversation` とする。このJSONが読めたときは描画DOMを使わない。`sourceId` はURLの共有パスセグメントである。
 
-ChatGPT通常会話で確認できたページには、本文の埋め込みが無く、仮想化も無かった。`data-chatgpt-search-message-ids` を文書順に読む。役割は `data-conversation-role="assistant"`、`data-chatgpt-search-unit-key` の末尾、または見出し「あなたの発言:」で決める。ユーザー本文は `data-search-result-target`、assistant本文は `data-markdown-text-style="assistant-message"` の表示テキストである。段落、リスト、コードブロックの表示テキストを含め、その要素の中にある `data-search-result-target` へ本文を切り替えない。assistant本文が空の発言があるときは、描画前の殻として `not_ready` とし、空の成功にしない。発言がまだ無く、URLの会話識別子と同じ `data-conversation-id` を持つ textarea と、空の `[data-thread-user-message-navigation-content]` があるときも `not_ready` とする。サイドバーの履歴や起動時のbootstrapは本文に使わない。クラス名に `data-virtualized-turn-content` と書かれているだけでは仮想化とみなさない。属性としてその要素があるページは `incomplete_conversation` とし、スクロールでは集めない。この読み方の版は `chatgpt-3` である。タイトルは、サイト名 `ChatGPT` 以外の document title を使う。
-
-ChatGPTのサイドバー一覧は、文書順の `a[href]` のうち、パスが `/c/{識別子}` で、祖先の `data-sidebar-chatgpt-conversation-key` が `chatgpt:conversation:{同じ識別子}` のものだけを返す。クエリとフラグメントは識別子から除く。この一覧は本文に使わない。順次取り込みで開いた各ページは、既存の ChatGPT adapter が読む。`data-virtualized-turn-content` があるページは、1ページ取得と同じく `incomplete_conversation` になる。
+ChatGPT通常会話で確認できたページには、本文の埋め込みが無く、仮想化も無かった。`data-chatgpt-search-message-ids` を文書順に読む。役割は `data-conversation-role="assistant"`、`data-chatgpt-search-unit-key` の末尾、または見出し「あなたの発言:」で決める。ユーザー本文は `data-search-result-target`、assistant本文は `data-markdown-text-style="assistant-message"` の表示テキストである。段落、リスト、コードブロックの表示テキストを含め、その要素の中にある `data-search-result-target` へ本文を切り替えない。assistant本文が空の発言があるときは、描画前の殻として `not_ready` とし、空の成功にしない。発言がまだ無く、URLの会話識別子と同じ `data-conversation-id` を持つ textarea と、空の `[data-thread-user-message-navigation-content]` があるときも `not_ready` とする。サイドバーの履歴や起動時のbootstrapは本文に使わない。クラス名に `data-virtualized-turn-content` と書かれているだけでは仮想化とみなさない。属性としてその要素があるページは `incomplete_conversation` とし、スクロールでは集めない。この読み方の版は `chatgpt-3` である。タイトルは、サイト名 `ChatGPT` 以外の document title を使う。ChatGPTのサイドバーは順次取り込みの対象にしない。見えている範囲だけでも成功になり、短い記録が別の記録として残るためである。
 
 サインイン画面のDOMは未確認なので、`login_required` を返すセレクタは置いていない。既知の構造が無い読み込み済みDocumentは `unrecognized_structure` である。
 
@@ -317,7 +315,7 @@ fixtureへはこの契約を再現する最小データだけを置く。convers
 
 一覧の各行は、タイトル、provider、取得日時、発言数を示す。同じ `sourceId` の記録が複数あれば、取得日時で区別する。
 
-取得セッションの分岐は `src/capture/session.ts` の純粋関数に置く。サイドバーの順次取り込みの進行は `src/capture/batch.ts` の純粋関数に置く。現在のタブへ取得要求を送る処理、ダッシュボードを開く処理、2秒間隔の再取得、開いているCopilotまたはChatGPTの通常会話タブを識別子ごとに開く処理は、その関数の結果を実行する側へ分ける。一覧は開始時の文書から一度だけ読み、移動先のサイドバーは読まない。保存完了は、各会話のJSONがフォルダに書けたときである。
+取得セッションの分岐は `src/capture/session.ts` の純粋関数に置く。サイドバーの順次取り込みの進行は `src/capture/batch.ts` の純粋関数に置く。現在のタブへ取得要求を送る処理、ダッシュボードを開く処理、2秒間隔の再取得、開いているCopilotの通常会話タブを識別子ごとに開く処理は、その関数の結果を実行する側へ分ける。一覧は開始時の文書から一度だけ読み、移動先のサイドバーは読まない。保存完了は、各会話のJSONがフォルダに書けたときである。失敗した会話は、開始時のタイトルと識別子を実行中のパネルと終了後の保存一覧に残す。タイトルが空のときは識別子だけを出す。次の一括を始めるまで残し、以前の記録は上書きしない。
 
 ## 検証
 

@@ -301,7 +301,10 @@ describe("Dashboard", () => {
         return 4;
       },
       async listIds() {
-        return ["one", "two"];
+        return [
+          { id: "one", title: "one" },
+          { id: "two", title: "two" },
+        ];
       },
       async open(_tabId, id) {
         opened.push(id);
@@ -320,6 +323,51 @@ describe("Dashboard", () => {
     expect(screen.queryByText("発言の全文プレビュー")).toBeNull();
     expect(opened).toEqual(["one", "two"]);
     expect(await repository.list()).toHaveLength(2);
+    expect(screen.queryByRole("heading", { name: "取り込めなかった会話" })).toBeNull();
+  });
+
+  it("lists the title and id of a conversation the batch could not store", async () => {
+    const repository = createTestRepository();
+    const memory = createMemoryArchive();
+    let current = "kept";
+    const capture = createPort(async () => {
+      if (current !== "kept") return { ok: false, code: "incomplete_conversation" };
+      return {
+        ok: true,
+        capture: {
+          ...sampleCapture(),
+          sourceId: current,
+          sourceUrl: `https://chatgpt.com/c/${current}`,
+          title: current,
+          messages: [{ ordinal: 0, role: "user", content: current, providerMessageId: current }],
+        },
+      };
+    });
+    const batch: SidebarBatchPort = {
+      async findTab() {
+        return 4;
+      },
+      async listIds() {
+        return [
+          { id: "kept", title: "残った題" },
+          { id: "missed", title: "失敗した題" },
+          { id: "blank", title: "" },
+        ];
+      },
+      async open(_tabId, id) {
+        current = id;
+        return "complete";
+      },
+    };
+    renderDashboard(repository, capture.port, memory.archive, batch);
+    fireEvent.click(await screen.findByRole("button", { name: "サイドバーの会話を順に取り込む" }));
+
+    expect(await screen.findByRole("heading", { name: "取り込めなかった会話" })).toBeTruthy();
+    expect(screen.getByText("失敗した題")).toBeTruthy();
+    expect(screen.getByText("missed")).toBeTruthy();
+    expect(screen.getByText("blank").textContent).toBe("blank");
+    expect(screen.queryByText("残った題")).toBeNull();
+    expect(await repository.list()).toHaveLength(1);
   });
 });
 
