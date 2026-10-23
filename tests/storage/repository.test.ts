@@ -30,6 +30,19 @@ describe("conversation repository", () => {
       messages: [{ content: "初めの問い" }],
     });
   });
+
+  it("keeps version 1 conversations when the archive table is added", async () => {
+    const name = `trailogue-test-${crypto.randomUUID()}`;
+    const record = await conversation("conversation-1", "初めの問い", "2026-01-01T00:00:00.000Z");
+    await seedVersion1(name, record);
+
+    const db = openDatabase(name);
+    databases.push(db);
+    expect(await createRepository(db).findById(record.id)).toMatchObject({
+      messages: [{ content: "初めの問い" }],
+    });
+    expect(await db.archiveHandles.get("directory")).toBeUndefined();
+  });
 });
 
 function createTestRepository(): ConversationRepository {
@@ -49,4 +62,29 @@ function conversation(sourceId: string, content: string, capturedAt: string): Pr
     messages: [{ ordinal: 0, role: "user", content }],
   };
   return normalize(raw, { id: crypto.randomUUID(), capturedAt });
+}
+
+function seedVersion1(name: string, record: Conversation): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(name, 1);
+    request.onerror = () => reject(request.error);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      const store = db.createObjectStore("conversations", { keyPath: "id" });
+      store.createIndex("provider", "provider");
+      store.createIndex("sourceId", "sourceId");
+      store.createIndex("contentHash", "contentHash", { unique: true });
+      store.createIndex("capturedAt", "capturedAt");
+    };
+    request.onsuccess = () => {
+      const db = request.result;
+      const tx = db.transaction("conversations", "readwrite");
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => reject(tx.error);
+      tx.objectStore("conversations").add(record);
+    };
+  });
 }

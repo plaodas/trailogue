@@ -11,13 +11,14 @@ flowchart LR
     Adapter --> Capture["Raw structured capture"]
     Capture --> Normalize["Conversation normalizer"]
     Normalize --> Dashboard["Extension dashboard preview"]
-    Normalize --> Store["IndexedDB repository"]
-    Store --> Reader["Conversation reader"]
-    Store --> PathView["Thought path view"]
-    Store --> Exporter["Markdown exporter"]
+    Dashboard --> Archive["Chosen folder JSON"]
+    Archive --> Store["IndexedDB working copy"]
+    Archive --> Reader["Conversation reader"]
+    Archive --> PathView["Thought path view"]
+    Archive --> Exporter["Markdown exporter"]
 ```
 
-ダッシュボード、原文、思考経路、Markdownは、同じ `Conversation` を読む。経路とMarkdownは保存せず、表示または書き出しのたびに作る。
+ダッシュボード、原文、思考経路、Markdownは、同じ `Conversation` を読む。保存の正本は、利用者が選んだフォルダのJSONである。経路とMarkdownは保存せず、その `Conversation` から表示または書き出しのたびに作る。
 
 ## 技術
 
@@ -40,10 +41,13 @@ flowchart LR
 flowchart TD
     ui["src/ui"] --> capture["src/capture"]
     ui --> storage["src/storage"]
+    ui --> archive["src/archive"]
     ui --> exportMd["src/export"]
     ui --> domain["src/domain"]
     capture --> domain
     storage --> domain
+    archive --> storage
+    archive --> domain
     exportMd --> domain
     providers["src/providers"] --> domain
     entry["entrypoints"] --> providers
@@ -79,6 +83,9 @@ src/
   storage/
     db.ts
     repository.ts
+  archive/
+    conversationFile.ts
+    fileSystemArchive.ts
   export/
     markdown.ts
   ui/
@@ -239,15 +246,22 @@ Markdownは `toMarkdown(conversation)` の純粋関数で作る。ファイル�
 
 ## 保存
 
-データベース名は `trailogue`、Dexieのschema versionは1とする。
+保存の正本は、利用者が一度選んだフォルダに置く `{contentHash}.json` である。中身は `Conversation` のJSON（UTF-8）であり、本文は変えない。ファイル名と中身の `contentHash` は、保存時と同じ計算で本文から出したSHA-256と一致するときだけ記録として読む。一致しないファイルは読まず、消さない。有効なファイルが既にあるときは書き直さない。同名でも検証に失敗するファイルだけ、保存する `Conversation` で書き直す。
+
+この読み書きは `src/archive/conversationFile.ts` に置く。DOMもDexieも知らない。ダッシュボードは `ConversationArchive`（書く、ハッシュで探す、一覧する、フォルダを開く）を受け取る。Edge / Chromeの実装は `src/archive/fileSystemArchive.ts` で、ダッシュボードから `showDirectoryPicker` を使う。ディレクトリハンドルはIndexedDBに保持する。ハンドルが消えてもファイルは残る。権限があるときだけフォルダを自動で読む。権限が無いときは「記録フォルダを開く」で同じフォルダを選び直し、JSONを読んで一覧と作業用記録を戻す。Chromeは再起動後に権限の再確認を求めることがある。
+
+初めてフォルダを選んだとき、作業用記録にあってファイルが無いものをその場で書き出す。一覧は、フォルダが読めるときはファイルを正とする。権限が無いあいだは作業用の一覧を出し、フォルダが未接続であることを示す。
+
+作業用データベース名は `trailogue` とする。Dexieのschema versionは2とする。`conversations` の索引はversion 1のままである。
 
 ```ts
 conversations: "id, provider, sourceId, &contentHash, capturedAt"
+archiveHandles: "id"
 ```
 
-repositoryは `Conversation` だけを受け取る。挿入前にハッシュで検索し、既存があれば既存を返す。物理削除と上書き更新はMVPの操作に含めない。
+`archiveHandles` はversion 2で足す。中身は選んだフォルダのハンドル1件である。repositoryは `Conversation` だけを受け取る。挿入前にハッシュで検索し、既存があれば既存を返す。物理削除と上書き更新はMVPの操作に含めない。Dexieへの挿入は、フォルダへ書けたあとで行う。
 
-未保存プレビューはReactの状態に置く。保存失敗後もその状態から `toMarkdown` を呼べるようにする。
+未保存プレビューはReactの状態に置く。フォルダに書けなかったあとでも、その状態から `toMarkdown` を呼べるようにする。経路とMarkdownは、ファイルから読んだ `Conversation` から毎回作る。
 
 ## adapter契約
 
@@ -311,15 +325,19 @@ fixtureへはこの契約を再現する最小データだけを置く。convers
 - provider fixtureの成功と4種の失敗
 - Markdownの全文が本文と一致すること
 - repositoryが同じハッシュを2件挿入しないこと
+- 検証済みJSONが同じ `Conversation` に戻ること。本文を変えたファイルは不採用になること
+- 有効なファイルを上書きせず、検証に失敗した同名ファイルだけを置き換えること
+- フォルダへ書けないとき、作業用記録へ挿入せずプレビューが残ること
+- 作業用記録が空でも、フォルダのファイルから同一ハッシュと原文を戻せる
 - 保存失敗後もプレビューからMarkdownを作れること
 
 実装後の手動確認:
 
 1. EdgeまたはChromeへ、ビルドした拡張を読み込む
 2. Copilotで通常会話を開き、そのタブで拡張機能ボタンを押す。ボタンは同じURLを読み直す
-3. プレビューの発言が会話全体の順序と本文に一致することを確認して保存する
+3. プレビューの発言が会話全体の順序と本文に一致することを確認して保存する。初回の保存で記録フォルダを選ぶ
 4. ダッシュボードを開き直し、原文、思考経路、Markdownを確認する
-5. 同じ会話を再取得し、重複保存されないことを確認する
+5. 同じ会話を再取得し、重複保存されないことを確認する。選んだフォルダのJSONが、拡張機能のデータを消したあとも開き直せて、同じ原文になることを確認する
 6. Copilotの共有会話、ChatGPTの通常会話と共有会話で2から5を行う
 7. providerのホーム、設定、一覧で実行し、保存されないことを確認する
 8. 対応外ホストで実行し、ページを取得しないことを確認する
