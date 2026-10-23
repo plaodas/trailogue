@@ -8,7 +8,7 @@ describe("provider adapters", () => {
     const page = document.implementation.createHTMLDocument("ChatGPT");
 
     expect(copilotVersion).toBe("copilot-2");
-    expect(chatgptVersion).toBe("chatgpt-3");
+    expect(chatgptVersion).toBe("chatgpt-4");
     expect(parseCopilot(page, "https://copilot.cloud.microsoft/chat/share/token")).toEqual({
       ok: false,
       code: "unrecognized_structure",

@@ -52,7 +52,7 @@ content scriptはページ表示のたびに取得または保存しない。利
 adapterは、すでに読み込まれたDocumentだけを見る。返すのは `RawCapture` か失敗であり、保存用に本文をMarkdownへ変換しない。
 
 1. ページ内の埋め込み会話データがあれば、それを解釈する。Copilotでは inline script の `window.__staticRouterHydrationData` を読む。通常会話は `loaderData["chat-history"].store.rawConversationResponse`、共有会話は `loaderData["chat-share-redeem"].store.rawConversationResponse` である。この script は `#root` 内にあり、描画後に消える。content script は `document_start` で追加された script のテキストだけを保持し、取得要求のときに Document 内の script を優先して解釈する。保持分は、保持したときのパスと現在のパスが一致するときだけ使う。ChatGPT共有会話は `script#__WEB_MOBILE_DATA__` の `conversation.messages` を読む。
-2. 埋め込みデータが無い、または会話として成立しなければ、表示済みの会話DOMを読む。確認できた ChatGPT通常会話は、`data-chatgpt-search-message-ids`、ユーザー見出し「あなたの発言:」、`data-conversation-role="assistant"` の文書順である。`data-virtualized-turn-content` があるページは、見えている発言だけでは全件とみなさない。発言がまだ無く、URLと同じ `data-conversation-id` の入力欄と空の `[data-thread-user-message-navigation-content]` だけがあるときは `not_ready` とし、描画を待つ。サイドバーの履歴は本文に使わない。
+2. 埋め込みデータが無い、または会話として成立しなければ、表示済みの会話DOMを読む。確認できた ChatGPT通常会話は、`data-chatgpt-search-message-ids`、ユーザー見出し「あなたの発言:」、`data-conversation-role="assistant"` の文書順である。本文のある最初のユーザー発言より前は残さない。空白だけのユーザー本文も、本文が無いものとして手前に含める。本文のあるユーザーが1件も無いときは会話ゼロとする。そのユーザーより後の空本文は残す。`data-virtualized-turn-content` があるページは、見えている発言だけでは全件とみなさない。発言がまだ無く、URLと同じ `data-conversation-id` の入力欄と空の `[data-thread-user-message-navigation-content]` だけがあるときは `not_ready` とし、描画を待つ。サイドバーの履歴は本文に使わない。
 3. どちらも成立しなければ失敗とする。Copilotでアプリの枠だけがあり、使える hydration script が無いときは会話不完全とする。
 
 `document.body.innerText` の一括保存は成功扱いにしない。サインイン文言、ナビゲーション、ボタン名が軌跡へ混ざるためである。
@@ -63,7 +63,7 @@ adapterは、すでに読み込まれたDocumentだけを見る。返すのは `
 
 各発言は `user`、`assistant`、`unknown` のいずれかである。役割を判定できなければ `unknown` とし、assistantへ寄せない。
 
-保存する本文は、表示されたテキスト、または埋め込みデータ中の発言テキストである。前後の空白だけを除き、改行コードはLFへ揃える。行の内側、空行、表記は変えない。画像、添付ファイル、参照されたMicrosoft 365ファイルはダウンロードしない。テキストの無い発言は、順序を保つために空の本文のまま残し、プレビューでその件数を警告する。
+保存する本文は、表示されたテキスト、または埋め込みデータ中の発言テキストである。前後の空白だけを除き、改行コードはLFへ揃える。行の内側、空行、表記は変えない。画像、添付ファイル、参照されたMicrosoft 365ファイルはダウンロードしない。テキストの無い発言は、順序を保つために空の本文のまま残し、プレビューでその件数を警告する。ChatGPT通常会話で、本文のある最初のユーザー発言より前にあるものは除く。
 
 会話タイトルは、会話自身の見出しが特定できた場合だけ使う。ページのサイト名（`Microsoft Copilot`、`ChatGPT` など）はタイトルにしない。見出しが無ければ、最初のユーザー発言の先頭80文字を表示用タイトルにする。文字数はUnicodeコードポイント単位で数える。本文側のその発言は省略しない。
 
