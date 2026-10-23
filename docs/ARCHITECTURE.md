@@ -273,7 +273,7 @@ Copilotは通常会話と共有会話のどちらも、inline script の `window
 - 通常会話: `loaderData["chat-history"].store.rawConversationResponse`
 - 共有会話: `loaderData["chat-share-redeem"].store.rawConversationResponse`
 
-使うのは `messages` の配列順、`author`（`user` はそのまま、`bot` は `assistant`、それ以外は `unknown`）、`text`、`messageId`、`chatName`、照合用の `conversationId` と `conversationDebugMetrics.messageCount` である。サイドバーの履歴や `loaderData.chat` は使わない。`messageCount` が配列長と違うときは `incomplete_conversation`、配列が0件のときは `empty_conversation` とする。通常会話では `conversationId` がURLのパス識別子と一致するときだけ採用し、`sourceId` はその識別子にする。共有会話で `conversationId` があるときはそれを `sourceId` にし、無いときはURLのパスセグメントを使う。共有トークンはデコードしない。
+使うのは `messages` の配列順、`author`（`user` はそのまま、`bot` は `assistant`、それ以外は `unknown`）、`text`、`messageId`、`chatName`、照合用の `conversationId` と `conversationDebugMetrics.messageCount` である。`text` が文字列のときはそれを本文にする。空文字も本文であり、カードは見ない。`text` が無く、`adaptiveCards` の各 `body` が `TextBlock` だけで `text` が文字列のときは、その文字列を出現順に改行でつなぐ。カードを Markdown へ組み替えない。`body` に `TextBlock` 以外がある、または `TextBlock.text` が文字列でないときは `incomplete_conversation` とする。`text` も読めるカードも無い発言は空の本文のまま残す。この読み方の版は `copilot-2` である。サイドバーの履歴や `loaderData.chat` は使わない。`messageCount` が配列長と違うときは `incomplete_conversation`、配列が0件のときは `empty_conversation` とする。通常会話では `conversationId` がURLのパス識別子と一致するときだけ採用し、`sourceId` はその識別子にする。共有会話で `conversationId` があるときはそれを `sourceId` にし、無いときはURLのパスセグメントを使う。共有トークンはデコードしない。
 
 この script は `#root` の中にあり、Reactのハイドレーションで消える。`document_start` の時点ではまだ script が無いので、MutationObserver が script 要素の追加を見てテキストを残す。取得要求では Document 内の script を優先し、無ければ同じパスで保持したテキストを使う。別会話の保持分は捨て、`#m365-copilot-app-layout-root` だけがあるときは `incomplete_conversation` とする。仮想スクロール上の発言へはフォールバックしない。Document の `readyState` が `loading` で script もまだ無いときは `not_ready` とする。
 

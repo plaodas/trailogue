@@ -7,7 +7,7 @@ import {
   type RetainedHydration,
 } from "./hydration";
 
-export const parserVersion = "copilot-1";
+export const parserVersion = "copilot-2";
 
 const LOADER_KEY = {
   conversation: "chat-history",
@@ -69,7 +69,12 @@ export function parse(
   }
   if (raw.messages.length === 0) return { ok: false, code: "empty_conversation" };
 
-  const messages = raw.messages.map((message, ordinal) => toMessage(message, ordinal));
+  const messages: RawMessage[] = [];
+  for (const [ordinal, message] of raw.messages.entries()) {
+    const parsed = toMessage(message, ordinal);
+    if (!parsed) return { ok: false, code: "incomplete_conversation" };
+    messages.push(parsed);
+  }
 
   const capture: RawCapture = {
     provider: "copilot",
@@ -105,15 +110,40 @@ function debugMessageCount(raw: Record<string, unknown>): number | undefined {
   return typeof count === "number" ? count : undefined;
 }
 
-function toMessage(message: unknown, ordinal: number): RawMessage {
+function toMessage(message: unknown, ordinal: number): RawMessage | null {
   if (!isRecord(message)) return { ordinal, role: "unknown", content: "" };
+  const content = messageContent(message);
+  if (content === null) return null;
   const providerMessageId = stringValue(message.messageId);
   return {
     ordinal,
     role: message.author === "user" ? "user" : message.author === "bot" ? "assistant" : "unknown",
-    content: typeof message.text === "string" ? message.text : "",
+    content,
     ...(providerMessageId ? { providerMessageId } : {}),
   };
+}
+
+function messageContent(message: Record<string, unknown>): string | null {
+  if (typeof message.text === "string") return message.text;
+  return textBlockContent(message.adaptiveCards);
+}
+
+function textBlockContent(cards: unknown): string | null {
+  if (!Array.isArray(cards) || cards.length === 0) return "";
+  const parts: string[] = [];
+  for (const card of cards) {
+    if (!isRecord(card)) return null;
+    const body = card.body;
+    if (body === undefined) continue;
+    if (!Array.isArray(body)) return null;
+    for (const block of body) {
+      if (!isRecord(block) || block.type !== "TextBlock" || typeof block.text !== "string") {
+        return null;
+      }
+      parts.push(block.text);
+    }
+  }
+  return parts.join("\n");
 }
 
 function stringValue(value: unknown): string | undefined {

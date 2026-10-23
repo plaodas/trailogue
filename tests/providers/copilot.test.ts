@@ -35,11 +35,43 @@ describe("copilot adapter", () => {
         sourceId: "conv-1",
         sourceKind: "conversation",
         title: "大豆のおやつ",
-        parserVersion: "copilot-1",
+        parserVersion: "copilot-2",
         messages: [
           { ordinal: 0, role: "user", content: "作れルンバ", providerMessageId: "m1" },
           { ordinal: 1, role: "assistant", content: "もちろん\n作れる", providerMessageId: "m2" },
           { ordinal: 2, role: "unknown", content: "保留", providerMessageId: "m3" },
+        ],
+      },
+    });
+  });
+
+  it("reads a pinned reply from a TextBlock when the message has no text", () => {
+    const url = conversationUrl.replace("conv-1", "conv-pinned");
+    const result = parse(load("pinned.html"), url);
+
+    expect(result).toMatchObject({
+      ok: true,
+      capture: {
+        sourceId: "conv-pinned",
+        parserVersion: "copilot-2",
+        messages: [
+          { ordinal: 0, role: "user", content: "ピンした問い", providerMessageId: "u1" },
+          { ordinal: 1, role: "assistant", content: "一行目\n**強調**した返事", providerMessageId: "b1" },
+        ],
+      },
+    });
+  });
+
+  it("keeps the message text when a TextBlock also has different content", () => {
+    const url = conversationUrl.replace("conv-1", "conv-text");
+    const result = parse(load("text-over-card.html"), url);
+
+    expect(result).toMatchObject({
+      ok: true,
+      capture: {
+        messages: [
+          { content: "問い" },
+          { content: "本文" },
         ],
       },
     });
@@ -93,6 +125,7 @@ describe("copilot adapter", () => {
     ["empty.html", conversationUrl.replace("conv-1", "conv-empty"), "empty_conversation"],
     ["incomplete-count.html", conversationUrl.replace("conv-1", "conv-partial"), "incomplete_conversation"],
     ["shell.html", conversationUrl, "incomplete_conversation"],
+    ["unknown-card.html", conversationUrl.replace("conv-1", "conv-unknown-card"), "incomplete_conversation"],
     ["unrecognized.html", conversationUrl, "unrecognized_structure"],
   ] as const)("does not capture %s", (fixture, url, code) => {
     expect(parse(load(fixture), url)).toEqual({ ok: false, code });
