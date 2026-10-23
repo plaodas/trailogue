@@ -1,7 +1,7 @@
 import { classifyPage } from "../../capture/page";
 import type { MessageRole, ParseResult, RawCapture, RawMessage } from "../../domain/types";
 
-export const parserVersion = "chatgpt-1";
+export const parserVersion = "chatgpt-2";
 
 export type ChatgptParseOptions = {
   documentReady?: boolean;
@@ -86,15 +86,14 @@ function parseConversation(
     return { ok: false, code: ready ? "unrecognized_structure" : "not_ready" };
   }
 
+  const messages = turns.map((turn, ordinal) => conversationMessage(turn, ordinal));
+  if (messages.some((message) => message.role === "assistant" && message.content.trim().length === 0)) {
+    return { ok: false, code: "not_ready" };
+  }
+
   return {
     ok: true,
-    capture: capture(
-      url,
-      pathId,
-      "conversation",
-      titleFrom(document.title),
-      turns.map((turn, ordinal) => conversationMessage(turn, ordinal)),
-    ),
+    capture: capture(url, pathId, "conversation", titleFrom(document.title), messages),
   };
 }
 

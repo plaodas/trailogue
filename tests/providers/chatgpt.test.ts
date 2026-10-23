@@ -23,7 +23,7 @@ describe("chatgpt adapter", () => {
         sourceId: "share-1",
         sourceKind: "shared",
         title: "理由の設定",
-        parserVersion: "chatgpt-1",
+        parserVersion: "chatgpt-2",
         messages: [
           { ordinal: 0, role: "user", content: "問い", providerMessageId: "u1" },
           { ordinal: 1, role: "assistant", content: "答え\n続き", providerMessageId: "a1" },
@@ -34,6 +34,36 @@ describe("chatgpt adapter", () => {
     if (result.ok) {
       expect(result.capture.messages.some((message) => message.content.includes("DOMだけ"))).toBe(false);
     }
+  });
+
+  it("reads assistant prose and code from the rendered message", () => {
+    const result = parse(load("rendered-conversation.html"), conversationUrl);
+
+    expect(result).toMatchObject({
+      ok: true,
+      capture: {
+        sourceKind: "conversation",
+        title: "AI開発の検証方法",
+        messages: [
+          { ordinal: 0, role: "user", content: "問いその一", providerMessageId: "user-1" },
+          { ordinal: 1, role: "assistant", providerMessageId: "asst-1" },
+        ],
+      },
+    });
+    if (!result.ok) return;
+    const assistant = result.capture.messages[1]?.content ?? "";
+    expect(assistant).toContain("今回の条件なら、");
+    expect(assistant).toContain("分離する");
+    expect(assistant).toContain("git worktree");
+    expect(assistant).not.toContain("コピー");
+    expect(assistant).not.toContain("ChatGPT の発言");
+  });
+
+  it("waits instead of saving an assistant turn whose body is still empty", () => {
+    expect(parse(load("assistant-pending.html"), conversationUrl)).toEqual({
+      ok: false,
+      code: "not_ready",
+    });
   });
 
   it("reads a normal conversation from the confirmed message DOM", () => {
