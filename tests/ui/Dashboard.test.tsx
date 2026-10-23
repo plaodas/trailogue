@@ -13,6 +13,7 @@ const databases: TrailogueDatabase[] = [];
 
 afterEach(async () => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   cleanup();
   await Promise.all(databases.splice(0).map((db) => db.delete()));
 });
@@ -28,6 +29,7 @@ describe("Dashboard", () => {
     expect(messageBodies()).toEqual(["初めの問い", "一行目\n二行目の全文", ""]);
     expect(screen.getByText("不明")).toBeTruthy();
     expect(screen.getByText("空の本文が1件あります。")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Markdownを書き出す" })).toBeNull();
   });
 
   it("opens the saved record instead of inserting the same hash", async () => {
@@ -71,6 +73,25 @@ describe("Dashboard", () => {
     ]);
   });
 
+  it("shows every message on the thought path and downloads the saved text", async () => {
+    const repository = createTestRepository();
+    const downloads = captureDownloads();
+    const port = createPort(async () => ({ ok: true, capture: sampleCapture() }));
+    render(<Dashboard repository={repository} capture={port.port} />);
+    port.emit(readyStatus());
+    fireEvent.click(await screen.findByRole("button", { name: "保存" }));
+    expect(await screen.findByRole("button", { name: "原文" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "思考経路" }));
+
+    expect(messageBodies()).toEqual(["初めの問い", "一行目\n二行目の全文", ""]);
+    fireEvent.click(screen.getByRole("button", { name: "Markdownを書き出す" }));
+    const stored = await repository.list();
+    const markdown = await downloads[0]?.text();
+    expect(markdown).toContain("初めの問い");
+    expect(markdown).toContain("一行目\n二行目の全文");
+    expect(markdown).toContain(`- Captured: ${stored[0]?.capturedAt}`);
+  });
+
   it("keeps the preview text when saving fails", async () => {
     const repository = createTestRepository();
     const failing: ConversationRepository = {
@@ -88,6 +109,14 @@ describe("Dashboard", () => {
     expect(messageBodies()).toEqual(["初めの問い", "一行目\n二行目の全文", ""]);
     expect(screen.getByRole("button", { name: "保存を再試行" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "破棄" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "思考経路" })).toBeNull();
+    const downloads = captureDownloads();
+    fireEvent.click(screen.getByRole("button", { name: "Markdownを書き出す" }));
+    const markdown = await downloads[0]?.text();
+    expect(markdown).toContain("初めの問い");
+    expect(markdown).toContain("一行目\n二行目の全文");
+    expect(markdown).toContain("- Captured: \n");
+    expect(markdown).not.toContain("1970-01-01");
     expect(await repository.list()).toHaveLength(0);
   });
 
@@ -173,4 +202,15 @@ function sampleCapture(): RawCapture {
 
 function messageBodies(): string[] {
   return [...document.querySelectorAll("pre")].map((node) => node.textContent ?? "");
+}
+
+function captureDownloads(): Blob[] {
+  const blobs: Blob[] = [];
+  vi.spyOn(URL, "createObjectURL").mockImplementation((value) => {
+    blobs.push(value as Blob);
+    return "blob:markdown";
+  });
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  return blobs;
 }
