@@ -87,7 +87,7 @@ tests/
   fixtures/chatgpt/
 ```
 
-content scriptの入口は薄く保つ。明示的な取得要求を受けたときだけ `parse(document, url)` を呼び、結果を返す。HTML解釈のテストは、この純粋関数へfixtureのDocumentを渡して行う。
+content scriptの入口は薄く保つ。明示的な取得要求を受けたときだけ `parse(document, url)` を呼び、結果を返す。Copilotの content script はそれに加えて `document_start` で hydration script のテキストを保持する。保持は取得でも保存でもない。HTML解釈のテストは、この純粋関数へfixtureのDocumentを渡して行う。
 
 adapterの外へ出るものは `RawCapture` か失敗コードだけである。取得器は交換でき、保存、正規化、思考経路、MarkdownはproviderのDOMを知らない。既存の会話エクスポーターはForkせず、そのMarkdown変換、汎用セレクタ、部分取得の成功もこの境界へ入れない。進め方は [AGENTS.md](../AGENTS.md) に従う。
 
@@ -264,11 +264,28 @@ repositoryは `Conversation` だけを受け取る。挿入前にハッシュで
 | `unrecognized_structure` | 読み込み済みだが、既知の構造に一致しない |
 | `unsupported_page` | 対応ホスト外、または会話ページではない |
 
-fixtureはproviderごとに、通常会話の成功、共有会話の成功、サインイン画面、空の会話、会話不完全、構造不明を用意する。成功fixtureは期待する役割、順序、本文と一致させる。失敗fixtureが `RawCapture` を返したらテストを失敗させる。実ページで通常会話をまだ確認できていないproviderでは、通常会話fixtureとその本番セレクタを推測で作らず、未対応であることを明記する。
+fixtureは、確認できた通常会話と共有会話の成功、空の会話、会話不完全、構造不明を用意する。成功fixtureは期待する役割、順序、本文と一致させる。失敗fixtureが `RawCapture` を返したらテストを失敗させる。サインイン画面は未確認のため、そのfixtureとセレクタは実物のHTMLが取れてから置く。
 
 セレクタと埋め込み形式の解析は、fixtureで確認できたものだけを書く。確認できないCopilotの内部APIは推測で呼ばない。
 
-Copilot共有ページでは、実HTMLのinline scriptにある `window.__staticRouterHydrationData = JSON.parse(...)` の `loaderData["chat-share-redeem"].store.rawConversationResponse` に全50発言が入り、仮想化されたDOMには同時に4ターンだけが存在する例を確認している。content scriptからページ側のJavaScript変数へアクセスするのではなく、Document内の該当script要素のテキストを読み、代入されているJSON文字列だけを `JSON.parse` する。`eval` やページコンテキストへのコード注入は使わない。この形式では `messages` の `author`、`text`、`messageId`、配列順を使い、DOMへフォールバックしない。fixtureへはこの契約を再現する最小データだけを置き、conversation transfer token、reconnect token、他のチャット履歴、プロフィール画像を含む保存HTML全体を入れない。
+Copilotは通常会話と共有会話のどちらも、inline script の `window.__staticRouterHydrationData = JSON.parse(...)` から読む。ページ側のJavaScript変数は見ない。代入されているJSON文字列だけを `JSON.parse` する。`eval` やページコンテキストへのコード注入は使わない。
+
+- 通常会話: `loaderData["chat-history"].store.rawConversationResponse`
+- 共有会話: `loaderData["chat-share-redeem"].store.rawConversationResponse`
+
+使うのは `messages` の配列順、`author`（`user` はそのまま、`bot` は `assistant`、それ以外は `unknown`）、`text`、`messageId`、`chatName`、照合用の `conversationId` と `conversationDebugMetrics.messageCount` である。サイドバーの履歴や `loaderData.chat` は使わない。`messageCount` が配列長と違うときは `incomplete_conversation`、配列が0件のときは `empty_conversation` とする。通常会話では `conversationId` がURLのパス識別子と一致するときだけ採用し、`sourceId` はその識別子にする。共有会話で `conversationId` があるときはそれを `sourceId` にし、無いときはURLのパスセグメントを使う。共有トークンはデコードしない。
+
+この script は `#root` の中にあり、Reactのハイドレーションで消える。`document_start` の時点ではまだ script が無いので、MutationObserver が script 要素の追加を見てテキストを残す。取得要求では Document 内の script を優先し、無ければ同じパスで保持したテキストを使う。別会話の保持分は捨て、`#m365-copilot-app-layout-root` だけがあるときは `incomplete_conversation` とする。仮想スクロール上の発言へはフォールバックしない。Document の `readyState` が `loading` で script もまだ無いときは `not_ready` とする。
+
+共有ページでは、この hydration に全発言が入り、仮想化されたDOMには同時に一部のターンだけがある例を確認している。通常会話でも、最初のHTMLの `chat-history` に全発言があり、描画後のDOMは窓だけになる例を確認している。
+
+ChatGPT共有会話は `script#__WEB_MOBILE_DATA__` の `conversation.messages` を読む。各要素の `content`、`role`（`user` と `assistant` 以外は `unknown`）、`id`、タイトルの `conversation.title` を使う。`userMessageCount` がユーザー発言数と違うときは `incomplete_conversation` とする。このJSONが読めたときは描画DOMを使わない。`sourceId` はURLの共有パスセグメントである。
+
+ChatGPT通常会話で確認できたページには、本文の埋め込みが無く、仮想化も無かった。`data-chatgpt-search-message-ids` を文書順に読む。役割は `data-conversation-role="assistant"`、`data-chatgpt-search-unit-key` の末尾、または見出し「あなたの発言:」で決める。ユーザー本文は `data-search-result-target`、assistant本文は `data-markdown-text-style="assistant-message"` の表示テキストである。`data-virtualized-turn-content` があるページは `incomplete_conversation` とし、スクロールでは集めない。タイトルは、サイト名 `ChatGPT` 以外の document title を使う。
+
+サインイン画面のDOMは未確認なので、`login_required` を返すセレクタは置いていない。既知の構造が無い読み込み済みDocumentは `unrecognized_structure` である。
+
+fixtureへはこの契約を再現する最小データだけを置く。conversation transfer token、reconnect token、他のチャット履歴、プロフィール画像を含む保存HTML全体は入れない。
 
 ## 画面
 
