@@ -11,7 +11,11 @@ export default defineContentScript({
   main() {
     browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (!isCaptureRequest(message)) return;
-      sendResponse(parse(document, location.href));
+      sendResponse(
+        parse(document, location.href, {
+          documentReady: document.readyState !== "loading",
+        }),
+      );
     });
   },
 });

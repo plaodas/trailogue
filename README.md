@@ -1,6 +1,6 @@
 # Trailogue
 
-このビルドは実装準備の土台です。拡張機能のボタンはダッシュボードを開きます。会話の取得結果は保存せず、プレビュー、思考経路、Markdownのダウンロードはまだありません。
+このビルドは、現在のタブから会話を読むadapterまでを含む。拡張機能のボタンは取得要求を送り、ダッシュボードを開く。取得結果の保存、プレビュー、思考経路、Markdownのダウンロードはまだない。
 
 ## 開発
 
@@ -18,21 +18,25 @@ npm run build
 
 ## 確認できた範囲
 
-ページ判定だけを確認しています。許可するのは次のHTTPS URLで、識別子は空でない1つのパスセグメントです。クエリとフラグメントは無視します。
+許可するのは次のHTTPS URLで、識別子は空でない1つのパスセグメントです。クエリとフラグメントは無視します。
 
 - `https://copilot.cloud.microsoft/chat/conversation/{conversationId}`
 - `https://copilot.cloud.microsoft/chat/share/{token}`
 - `https://chatgpt.com/c/{conversationId}`
 - `https://chatgpt.com/share/{shareId}`
 
+adapterが依存している形式は次です。fixtureは実ページの保存HTMLではなく、この契約を確認する最小HTMLです。
+
+- Copilot通常会話と共有会話: inline script の `window.__staticRouterHydrationData`。通常会話は `loaderData["chat-history"].store.rawConversationResponse`、共有会話は `loaderData["chat-share-redeem"].store.rawConversationResponse`。`author` は `user` と `bot`、本文は `text`、順は配列順。
+- ChatGPT共有会話: `script#__WEB_MOBILE_DATA__` の `conversation.messages`。`role` は `user` と `assistant`、本文は `content`。
+- ChatGPT通常会話: `data-chatgpt-search-message-ids`、見出し「あなたの発言:」、`data-conversation-role="assistant"`。ユーザー本文は `data-search-result-target`、assistant本文は `data-markdown-text-style="assistant-message"`。
+
+Copilotの content script は `document_start` で hydration script のテキストを保持する。解釈と応答は、拡張機能のボタンによる取得要求のときだけ行う。
+
 ## 未確認のprovider依存
 
-adapterはページ構造を解釈しません。対応URLでも `unrecognized_structure` を返し、本番セレクタも成功fixtureも置いていません。`tests/fixtures` は空です。
+- CopilotとChatGPTのサインイン画面。`login_required` 用のセレクタは置いていない。
+- ChatGPT通常会話で長い会話が仮想化されたときの全件の取り方。`data-virtualized-turn-content` があるページは `incomplete_conversation` になる。
+- Copilotのアプリ内遷移で、新しい hydration script がDocumentへ入らない場合。そのときは保持分を別会話へ流用せず、`incomplete_conversation` になる。会話のURLを読み直すと、最初のHTMLから保持できる。
 
-未確認のままにしているものは次です。
-
-- Copilot通常会話のDOMと埋め込み形式
-- ChatGPT通常会話のDOMと埋め込み形式
-- ChatGPT共有会話のDOMと埋め込み形式
-
-Copilot共有ページでは、inline scriptの `window.__staticRouterHydrationData` に構造化会話が入る例を別途確認しています。このビルドはその解釈を含みません。実ページの保存HTMLは、トークンや他の履歴を含むためfixtureにしていません。
+実ページの保存HTMLは、トークンや他の履歴を含むため fixture にしていない。

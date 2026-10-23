@@ -48,9 +48,9 @@ content scriptはページ表示のたびに取得または保存しない。利
 
 adapterは、すでに読み込まれたDocumentだけを見る。返すのは `RawCapture` か失敗であり、保存用に本文をMarkdownへ変換しない。
 
-1. ページ内の埋め込み会話データがあれば、それを解釈する。Copilotでは共有ページの `window.__staticRouterHydrationData` 内にある構造化会話、ChatGPTではReact Flight / turbo-stream形式の埋め込みが、実ページで確認できた対象になる。
-2. 埋め込みデータが無い、または会話として成立しなければ、表示済みの会話DOMを読む。
-3. どちらも成立しなければ失敗とする。
+1. ページ内の埋め込み会話データがあれば、それを解釈する。Copilotでは inline script の `window.__staticRouterHydrationData` を読む。通常会話は `loaderData["chat-history"].store.rawConversationResponse`、共有会話は `loaderData["chat-share-redeem"].store.rawConversationResponse` である。この script は `#root` 内にあり、描画後に消える。content script は `document_start` で追加された script のテキストだけを保持し、取得要求のときに Document 内の script を優先して解釈する。保持分は、保持したときのパスと現在のパスが一致するときだけ使う。ChatGPT共有会話は `script#__WEB_MOBILE_DATA__` の `conversation.messages` を読む。
+2. 埋め込みデータが無い、または会話として成立しなければ、表示済みの会話DOMを読む。確認できた ChatGPT通常会話は、`data-chatgpt-search-message-ids`、ユーザー見出し「あなたの発言:」、`data-conversation-role="assistant"` の文書順である。`data-virtualized-turn-content` があるページは、見えている発言だけでは全件とみなさない。
+3. どちらも成立しなければ失敗とする。Copilotでアプリの枠だけがあり、使える hydration script が無いときは会話不完全とする。
 
 `document.body.innerText` の一括保存は成功扱いにしない。サインイン文言、ナビゲーション、ボタン名が軌跡へ混ざるためである。
 
