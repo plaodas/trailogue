@@ -9,7 +9,6 @@ export default defineBackground(() => {
     publish(status) {
       void browser.runtime.sendMessage(status).catch(() => undefined);
     },
-    tabs: browser.tabs,
   });
 
   browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
