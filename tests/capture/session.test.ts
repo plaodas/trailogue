@@ -52,6 +52,13 @@ describe("transition", () => {
     );
   });
 
+  it("returns to the list from capture, preview, and a duplicate", () => {
+    expect(transition("inspecting", { type: "show_list" })).toBe("idle");
+    expect(transition("preview", { type: "show_list" })).toBe("idle");
+    expect(transition("duplicate", { type: "show_list" })).toBe("idle");
+    expect(transition("saving", { type: "show_list" })).toBe("saving");
+  });
+
   it("ignores events from the wrong state", () => {
     expect(transition("idle", { type: "captured" })).toBe("idle");
     expect(transition("preview", { type: "retry" })).toBe("preview");

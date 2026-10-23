@@ -20,6 +20,7 @@ export type SessionEvent =
   | { type: "same_hash" }
   | { type: "save" }
   | { type: "discard" }
+  | { type: "show_list" }
   | { type: "stored" }
   | { type: "store_failed" }
   | { type: "open_existing" }
@@ -46,6 +47,7 @@ export function transition(state: SessionState, event: SessionEvent): SessionSta
   }
   if (state === "inspecting" && event.type === "captured") return "preview";
   if (state === "inspecting" && event.type === "tab_closed") return "cancelled";
+  if (state === "inspecting" && event.type === "show_list") return "idle";
   if (
     (state === "awaiting_login" || state === "waiting_for_dom") &&
     event.type === "retry"
@@ -67,6 +69,8 @@ export function transition(state: SessionState, event: SessionEvent): SessionSta
   if (state === "preview" && event.type === "same_hash") return "duplicate";
   if (state === "preview" && event.type === "save") return "saving";
   if (state === "preview" && event.type === "discard") return "idle";
+  if (state === "preview" && event.type === "show_list") return "idle";
+  if (state === "duplicate" && event.type === "show_list") return "idle";
   if (state === "saving" && event.type === "stored") return "saved";
   if (state === "saving" && event.type === "store_failed") return "preview";
   if (state === "duplicate" && event.type === "open_existing") return "saved";
