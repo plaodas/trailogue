@@ -1,18 +1,24 @@
 import { browser } from "wxt/browser";
 import { defineBackground } from "wxt/utils/define-background";
-import { classifyPage } from "../src/capture/page";
-import { CAPTURE_REQUEST } from "../src/capture/request";
+import { createCaptureLauncher } from "../src/capture/launch";
+import { isDashboardReady } from "../src/capture/status";
 
 export default defineBackground(() => {
-  browser.action.onClicked.addListener(async (tab) => {
-    if (tab.id !== undefined && tab.url && classifyPage(tab.url)) {
-      try {
-        await browser.tabs.sendMessage(tab.id, { type: CAPTURE_REQUEST });
-      } catch {
-        // 取得元タブを開閉せず、応答できないタブでもダッシュボードだけ開く。
-      }
-    }
-    await openDashboard();
+  const launcher = createCaptureLauncher({
+    openDashboard,
+    publish(status) {
+      void browser.runtime.sendMessage(status).catch(() => undefined);
+    },
+    tabs: browser.tabs,
+  });
+
+  browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (!isDashboardReady(message)) return;
+    sendResponse(launcher.status());
+  });
+
+  browser.action.onClicked.addListener((tab) => {
+    void launcher.click({ id: tab.id, url: tab.url });
   });
 });
 
