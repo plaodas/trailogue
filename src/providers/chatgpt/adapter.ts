@@ -1,7 +1,7 @@
 import { classifyPage } from "../../capture/page";
 import type { MessageRole, ParseResult, RawCapture, RawMessage } from "../../domain/types";
 
-export const parserVersion = "chatgpt-2";
+export const parserVersion = "chatgpt-3";
 
 export type ChatgptParseOptions = {
   documentReady?: boolean;
@@ -83,7 +83,10 @@ function parseConversation(
     (element) => !element.parentElement?.closest("[data-chatgpt-search-message-ids]"),
   );
   if (turns.length === 0) {
-    return { ok: false, code: ready ? "unrecognized_structure" : "not_ready" };
+    return {
+      ok: false,
+      code: !ready || conversationShellPending(document, pathId) ? "not_ready" : "unrecognized_structure",
+    };
   }
 
   const messages = turns.map((turn, ordinal) => conversationMessage(turn, ordinal));
@@ -95,6 +98,13 @@ function parseConversation(
     ok: true,
     capture: capture(url, pathId, "conversation", titleFrom(document.title), messages),
   };
+}
+
+function conversationShellPending(document: Document, pathId: string): boolean {
+  const pending = [...document.querySelectorAll("textarea[data-conversation-id]")].some(
+    (element) => element.getAttribute("data-conversation-id") === pathId,
+  );
+  return pending && document.querySelector("[data-thread-user-message-navigation-content]") !== null;
 }
 
 function sharedMessage(message: unknown, ordinal: number): RawMessage {
