@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import type { DashboardPhase, DashboardStatus } from "../capture/status";
 import { transition, type SessionEvent, type SessionState } from "../capture/session";
 import { normalize } from "../domain/normalize";
+import { deriveThoughtPath } from "../domain/thoughtPath";
 import type { CaptureFailureCode, Conversation, MessageRole, ProviderId } from "../domain/types";
 import type { ConversationRepository } from "../storage/repository";
 import type { CapturePort, CaptureRead } from "./capturePort";
 import { copy, failureCopy } from "./copy";
+import { downloadMarkdown } from "./downloadMarkdown";
 
 const RETRY_INTERVAL_MS = 2000;
 const RETRY_WINDOW_MS = 10000;
@@ -271,6 +273,9 @@ export function Dashboard({ repository, capture }: Props) {
           emptyCount={emptyCount}
           domWaitExpired={domWaitExpired}
           onSave={() => void save()}
+          onExport={() => {
+            if (draft) downloadMarkdown(draft, "");
+          }}
           onDiscard={discard}
           onRetry={retryNow}
           onCancel={cancel}
@@ -317,6 +322,7 @@ function CaptureView({
   emptyCount,
   domWaitExpired,
   onSave,
+  onExport,
   onDiscard,
   onRetry,
   onCancel,
@@ -332,6 +338,7 @@ function CaptureView({
   emptyCount: number;
   domWaitExpired: boolean;
   onSave: () => void;
+  onExport: () => void;
   onDiscard: () => void;
   onRetry: () => void;
   onCancel: () => void;
@@ -358,6 +365,7 @@ function CaptureView({
           saveFailed={saveFailed}
           domWaitExpired={domWaitExpired}
           onSave={onSave}
+          onExport={onExport}
           onDiscard={onDiscard}
           onRetry={onRetry}
           onCancel={onCancel}
@@ -407,6 +415,7 @@ function StatusActions({
   saveFailed,
   domWaitExpired,
   onSave,
+  onExport,
   onDiscard,
   onRetry,
   onCancel,
@@ -417,6 +426,7 @@ function StatusActions({
   saveFailed: boolean;
   domWaitExpired: boolean;
   onSave: () => void;
+  onExport: () => void;
   onDiscard: () => void;
   onRetry: () => void;
   onCancel: () => void;
@@ -452,7 +462,12 @@ function StatusActions({
     return <button type="button" onClick={onOpenExisting}>既存を開く</button>;
   }
   if (session === "preview" && saveFailed) {
-    return <button type="button" onClick={onSave}>保存を再試行</button>;
+    return (
+      <>
+        <button type="button" onClick={onSave}>保存を再試行</button>
+        <button type="button" onClick={onExport}>Markdownを書き出す</button>
+      </>
+    );
   }
   if (session === "preview" || session === "saving") {
     return (
@@ -479,14 +494,38 @@ function Transcript({ conversation }: { conversation: Conversation }) {
 }
 
 function Reader({ conversation, onBack }: { conversation: Conversation; onBack: () => void }) {
+  const [view, setView] = useState<"original" | "path">("original");
   return (
     <section>
       <h2>{conversation.title}</h2>
       <p>{conversation.provider}</p>
       <time dateTime={conversation.capturedAt}>{conversation.capturedAt}</time>
-      <Transcript conversation={conversation} />
+      <div className="actions">
+        <button type="button" onClick={() => setView("original")}>原文</button>
+        <button type="button" onClick={() => setView("path")}>思考経路</button>
+        <button type="button" onClick={() => downloadMarkdown(conversation)}>Markdownを書き出す</button>
+      </div>
+      {view === "original" ? (
+        <Transcript conversation={conversation} />
+      ) : (
+        <ThoughtPath conversation={conversation} />
+      )}
       <button type="button" onClick={onBack}>一覧へ戻る</button>
     </section>
+  );
+}
+
+function ThoughtPath({ conversation }: { conversation: Conversation }) {
+  const messages = new Map(conversation.messages.map((message) => [message.id, message]));
+  return (
+    <ol>
+      {deriveThoughtPath(conversation).map((node) => (
+        <li key={node.id}>
+          <p>{roleLabel(conversation.provider, node.role)}</p>
+          <pre className="message" style={{ whiteSpace: "pre-wrap" }}>{messages.get(node.messageId)?.content ?? ""}</pre>
+        </li>
+      ))}
+    </ol>
   );
 }
 
