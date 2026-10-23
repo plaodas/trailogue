@@ -23,7 +23,7 @@ describe("chatgpt adapter", () => {
         sourceId: "share-1",
         sourceKind: "shared",
         title: "理由の設定",
-        parserVersion: "chatgpt-3",
+        parserVersion: "chatgpt-4",
         messages: [
           { ordinal: 0, role: "user", content: "問い", providerMessageId: "u1" },
           { ordinal: 1, role: "assistant", content: "答え\n続き", providerMessageId: "a1" },
@@ -77,6 +77,27 @@ describe("chatgpt adapter", () => {
     expect(parse(load("assistant-pending.html"), conversationUrl)).toEqual({
       ok: false,
       code: "not_ready",
+    });
+  });
+
+  it("drops turns before the first user message that has text", () => {
+    const result = parse(load("leading-remnant.html"), conversationUrl);
+
+    expect(result).toMatchObject({
+      ok: true,
+      capture: {
+        messages: [
+          { ordinal: 0, role: "user", content: "問いその一", providerMessageId: "user-1" },
+          { ordinal: 1, role: "assistant", content: "答えその一", providerMessageId: "asst-1" },
+        ],
+      },
+    });
+  });
+
+  it("does not save a page whose user messages are all empty", () => {
+    expect(parse(load("remnant-only.html"), conversationUrl)).toEqual({
+      ok: false,
+      code: "empty_conversation",
     });
   });
 

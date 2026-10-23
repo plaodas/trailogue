@@ -1,7 +1,7 @@
 import { classifyPage } from "../../capture/page";
 import type { MessageRole, ParseResult, RawCapture, RawMessage } from "../../domain/types";
 
-export const parserVersion = "chatgpt-3";
+export const parserVersion = "chatgpt-4";
 
 export type ChatgptParseOptions = {
   documentReady?: boolean;
@@ -89,7 +89,8 @@ function parseConversation(
     };
   }
 
-  const messages = turns.map((turn, ordinal) => conversationMessage(turn, ordinal));
+  const messages = dropLeadingRemnants(turns.map((turn, ordinal) => conversationMessage(turn, ordinal)));
+  if (messages.length === 0) return { ok: false, code: "empty_conversation" };
   if (messages.some((message) => message.role === "assistant" && message.content.trim().length === 0)) {
     return { ok: false, code: "not_ready" };
   }
@@ -98,6 +99,14 @@ function parseConversation(
     ok: true,
     capture: capture(url, pathId, "conversation", titleFrom(document.title), messages),
   };
+}
+
+function dropLeadingRemnants(messages: RawMessage[]): RawMessage[] {
+  const start = messages.findIndex(
+    (message) => message.role === "user" && message.content.trim().length > 0,
+  );
+  if (start < 0) return [];
+  return messages.slice(start).map((message, ordinal) => ({ ...message, ordinal }));
 }
 
 function conversationShellPending(document: Document, pathId: string): boolean {
