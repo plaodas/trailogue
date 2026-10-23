@@ -1,9 +1,15 @@
 import { browser } from "wxt/browser";
 import {
+  chatgptConversationUrl,
   copilotConversationUrl,
   isConversationIdList,
   SIDEBAR_LIST_REQUEST,
 } from "../capture/sidebar";
+
+const CONVERSATION_TABS = [
+  "https://copilot.cloud.microsoft/chat/conversation/*",
+  "https://chatgpt.com/c/*",
+];
 
 const NAVIGATION_TIMEOUT_MS = 60_000;
 
@@ -16,9 +22,7 @@ export type SidebarBatchPort = {
 export function createSidebarBatch(): SidebarBatchPort {
   return {
     async findTab() {
-      const tabs = await browser.tabs.query({
-        url: "https://copilot.cloud.microsoft/chat/conversation/*",
-      });
+      const tabs = await browser.tabs.query({ url: CONVERSATION_TABS });
       const active = tabs.find((tab) => tab.active && tab.id !== undefined);
       if (active?.id !== undefined) return active.id;
       return tabs.find((tab) => tab.id !== undefined)?.id ?? null;
@@ -45,13 +49,16 @@ export function createSidebarBatch(): SidebarBatchPort {
       }
     },
     async open(tabId, id) {
-      const url = copilotConversationUrl(id);
+      let current: string | undefined;
       try {
         const tab = await browser.tabs.get(tabId);
-        if (tab.url && sameConversation(tab.url, url)) return "complete";
+        current = tab.url;
       } catch {
         return "closed";
       }
+      const url = conversationUrl(current, id);
+      if (!url) return "unready";
+      if (current && sameConversation(current, url)) return "complete";
       const navigation = watchNavigation(tabId);
       try {
         await browser.tabs.update(tabId, { url });
@@ -65,6 +72,19 @@ export function createSidebarBatch(): SidebarBatchPort {
 }
 
 export const extensionBatch = createSidebarBatch();
+
+function conversationUrl(current: string | undefined, id: string): string | null {
+  if (!current) return null;
+  let host: string;
+  try {
+    host = new URL(current).hostname;
+  } catch {
+    return null;
+  }
+  if (host === "chatgpt.com") return chatgptConversationUrl(id);
+  if (host === "copilot.cloud.microsoft") return copilotConversationUrl(id);
+  return null;
+}
 
 function sameConversation(current: string, next: string): boolean {
   try {

@@ -1,7 +1,10 @@
 export const SIDEBAR_LIST_REQUEST = "trailogue:sidebar-list";
 
-const CONVERSATION_ORIGIN = "https://copilot.cloud.microsoft";
-const CONVERSATION_PREFIX = "/chat/conversation/";
+const COPILOT_ORIGIN = "https://copilot.cloud.microsoft";
+const COPILOT_PREFIX = "/chat/conversation/";
+const CHATGPT_ORIGIN = "https://chatgpt.com";
+const CHATGPT_PREFIX = "/c/";
+const CHATGPT_KEY_PREFIX = "chatgpt:conversation:";
 
 export function isSidebarListRequest(message: unknown): boolean {
   return isRecord(message) && message.type === SIDEBAR_LIST_REQUEST;
@@ -17,7 +20,7 @@ export function copilotConversationIds(document: Document): string[] {
   const ids: string[] = [];
   const seen = new Set<string>();
   for (const anchor of document.querySelectorAll("a[href]")) {
-    const id = conversationIdFromHref(anchor.getAttribute("href") ?? "");
+    const id = pathId(anchor.getAttribute("href") ?? "", COPILOT_ORIGIN, COPILOT_PREFIX);
     if (!id || !marked.has(id) || seen.has(id)) continue;
     seen.add(id);
     ids.push(id);
@@ -26,7 +29,26 @@ export function copilotConversationIds(document: Document): string[] {
 }
 
 export function copilotConversationUrl(id: string): string {
-  return `${CONVERSATION_ORIGIN}${CONVERSATION_PREFIX}${id}`;
+  return `${COPILOT_ORIGIN}${COPILOT_PREFIX}${id}`;
+}
+
+export function chatgptConversationIds(document: Document): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const anchor of document.querySelectorAll("a[href]")) {
+    const id = pathId(anchor.getAttribute("href") ?? "", CHATGPT_ORIGIN, CHATGPT_PREFIX);
+    if (!id || seen.has(id)) continue;
+    const key = anchor.closest("[data-sidebar-chatgpt-conversation-key]")
+      ?.getAttribute("data-sidebar-chatgpt-conversation-key");
+    if (key !== `${CHATGPT_KEY_PREFIX}${id}`) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
+export function chatgptConversationUrl(id: string): string {
+  return `${CHATGPT_ORIGIN}${CHATGPT_PREFIX}${id}`;
 }
 
 export function isConversationId(value: string): boolean {
@@ -37,15 +59,15 @@ export function isConversationIdList(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string" && isConversationId(item));
 }
 
-function conversationIdFromHref(href: string): string | null {
+function pathId(href: string, origin: string, prefix: string): string | null {
   let pathname: string;
   try {
-    pathname = new URL(href, CONVERSATION_ORIGIN).pathname;
+    pathname = new URL(href, origin).pathname;
   } catch {
     return null;
   }
-  if (!pathname.startsWith(CONVERSATION_PREFIX)) return null;
-  const id = pathname.slice(CONVERSATION_PREFIX.length);
+  if (!pathname.startsWith(prefix)) return null;
+  const id = pathname.slice(prefix.length);
   if (!isConversationId(id)) return null;
   return id;
 }
