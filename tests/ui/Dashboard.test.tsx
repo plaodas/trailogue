@@ -316,7 +316,7 @@ describe("Dashboard", () => {
       },
     };
     renderDashboard(repository, capture.port, memory.archive, batch);
-    fireEvent.click(await screen.findByRole("button", { name: "サイドバーの会話を順に取り込む" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Copilotのサイドバーの会話を順に取り込む" }));
 
     expect(await screen.findByRole("button", { name: /one/ })).toBeTruthy();
     expect(await screen.findByRole("button", { name: /two/ })).toBeTruthy();
@@ -362,7 +362,7 @@ describe("Dashboard", () => {
       },
     };
     renderDashboard(repository, capture.port, memory.archive, batch);
-    fireEvent.click(await screen.findByRole("button", { name: "サイドバーの会話を順に取り込む" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Copilotのサイドバーの会話を順に取り込む" }));
 
     expect(await screen.findByRole("heading", { name: "取り込めなかった会話" })).toBeTruthy();
     expect(screen.getByText("失敗した題")).toBeTruthy();

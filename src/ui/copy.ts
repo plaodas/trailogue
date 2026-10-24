@@ -26,7 +26,7 @@ export const copy = {
   emptyMessages: (count: number) => `空の本文が${count}件あります。`,
   batchDone: "サイドバーの会話を取り込みました",
   batchCancelled: "取り込みを止めています",
-  batchStart: "サイドバーの会話を順に取り込む",
+  batchStart: "Copilotのサイドバーの会話を順に取り込む",
   batchResume: "続きから",
   batchBack: "一覧へ戻る",
   batchPaused: "連続して構造を読めなかったので止めています",
