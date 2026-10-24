@@ -25,6 +25,17 @@ button,
   align-items: baseline;
 }
 
+.record-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.record-row .record {
+  flex: 1;
+  width: auto;
+}
+
 .record {
   width: 100%;
   text-align: left;

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   findConversationFile,
   listConversationFiles,
+  removeConversationFile,
   writeConversationFile,
   type ArchiveDirectory,
 } from "../../src/archive/conversationFile";
@@ -76,6 +77,9 @@ function memoryArchive(): { archive: ConversationArchive } {
     async write(name, contents) {
       files.set(name, contents);
     },
+    async remove(name) {
+      files.delete(name);
+    },
     async list() {
       return [...files.entries()].map(([name, text]) => ({ name, text }));
     },
@@ -92,6 +96,9 @@ function memoryArchive(): { archive: ConversationArchive } {
     },
     write(conversation) {
       return writeConversationFile(directory, conversation);
+    },
+    remove(conversation) {
+      return removeConversationFile(directory, conversation);
     },
     list() {
       return listConversationFiles(directory);

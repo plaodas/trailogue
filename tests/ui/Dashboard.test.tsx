@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DASHBOARD_STATUS, type DashboardStatus } from "../../src/capture/status";
 import { normalize } from "../../src/domain/normalize";
@@ -7,6 +7,7 @@ import type { RawCapture, RawMessage } from "../../src/domain/types";
 import {
   findConversationFile,
   listConversationFiles,
+  removeConversationFile,
   writeConversationFile,
   type ArchiveDirectory,
 } from "../../src/archive/conversationFile";
@@ -22,6 +23,7 @@ const databases: TrailogueDatabase[] = [];
 afterEach(async () => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   cleanup();
   await Promise.all(databases.splice(0).map((db) => db.delete()));
 });
@@ -369,6 +371,101 @@ describe("Dashboard", () => {
     expect(screen.queryByText("残った題")).toBeNull();
     expect(await repository.list()).toHaveLength(1);
   });
+
+  it("deletes the selected record and does not write it back", async () => {
+    const repository = createTestRepository();
+    const memory = createMemoryArchive();
+    const kept = await normalize(sampleCapture(), {
+      id: "kept",
+      capturedAt: "2026-02-01T00:00:00.000Z",
+    });
+    const dropped = await normalize(changedCapture(), {
+      id: "dropped",
+      capturedAt: "2026-03-01T00:00:00.000Z",
+    });
+    await memory.archive.write(kept);
+    await memory.archive.write(dropped);
+    await memory.directory.write("bad.json", "{");
+    await repository.insert(kept);
+    await repository.insert(dropped);
+    const confirm = stubConfirm(true);
+    const port = createPort(async () => ({ ok: true, capture: sampleCapture() }));
+    renderDashboard(repository, port.port, memory.archive);
+
+    expect(await screen.findByRole("button", { name: /経路の題/ })).toBeTruthy();
+    const row = screen.getByRole("button", { name: /変えた題/ }).closest("li");
+    if (!row) throw new Error("missing row");
+    fireEvent.click(within(row).getByRole("button", { name: "削除" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /変えた題/ })).toBeNull();
+    });
+    expect(confirm).toHaveBeenCalledWith("「変えた題」（copilot）をフォルダとブラウザ内から消します。");
+    expect(screen.getByRole("button", { name: /経路の題/ })).toBeTruthy();
+    expect(screen.getByText("読めなかったファイルが1件あります。")).toBeTruthy();
+    expect(await repository.findByHash(dropped.contentHash)).toBeUndefined();
+    expect(await repository.findByHash(kept.contentHash)).toBeTruthy();
+    expect(await memory.archive.findByHash(dropped.contentHash)).toBeUndefined();
+    expect(await memory.archive.findByHash(kept.contentHash)).toBeTruthy();
+    expect(await memory.directory.read("bad.json")).toBe("{");
+
+    cleanup();
+    renderDashboard(repository, port.port, memory.archive);
+    expect(await screen.findByRole("button", { name: /経路の題/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /変えた題/ })).toBeNull();
+    expect(await memory.archive.findByHash(dropped.contentHash)).toBeUndefined();
+    expect(await memory.directory.read("bad.json")).toBe("{");
+  });
+
+  it("deletes the open record and returns to the remaining list", async () => {
+    const repository = createTestRepository();
+    const memory = createMemoryArchive();
+    const kept = await normalize(sampleCapture(), {
+      id: "kept",
+      capturedAt: "2026-02-01T00:00:00.000Z",
+    });
+    const dropped = await normalize(changedCapture(), {
+      id: "dropped",
+      capturedAt: "2026-03-01T00:00:00.000Z",
+    });
+    await memory.archive.write(kept);
+    await memory.archive.write(dropped);
+    stubConfirm(true);
+    const port = createPort(async () => ({ ok: true, capture: sampleCapture() }));
+    renderDashboard(repository, port.port, memory.archive);
+
+    fireEvent.click(await screen.findByRole("button", { name: /変えた題/ }));
+    expect(await screen.findByRole("heading", { name: "変えた題" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "削除" }));
+
+    expect(await screen.findByRole("heading", { name: "保存した会話" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "変えた題" })).toBeNull();
+    expect(screen.getByRole("button", { name: /経路の題/ })).toBeTruthy();
+    expect(await memory.archive.findByHash(dropped.contentHash)).toBeUndefined();
+    expect(await memory.archive.findByHash(kept.contentHash)).toBeTruthy();
+  });
+
+  it("does not delete while the folder is closed", async () => {
+    const repository = createTestRepository();
+    const memory = createMemoryArchive("missing");
+    const existing = await normalize(sampleCapture(), {
+      id: "existing",
+      capturedAt: "2026-01-01T00:00:00.000Z",
+    });
+    await repository.insert(existing);
+    const confirm = stubConfirm(false);
+    const port = createPort(async () => ({ ok: true, capture: sampleCapture() }));
+    renderDashboard(repository, port.port, memory.archive);
+
+    expect(await screen.findByRole("button", { name: /経路の題/ })).toBeTruthy();
+    const button = screen.getByRole("button", { name: "削除" });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(button);
+
+    expect(confirm).not.toHaveBeenCalled();
+    expect(await repository.findByHash(existing.contentHash)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "記録フォルダを選ぶ" })).toBeTruthy();
+  });
 });
 
 function renderDashboard(
@@ -390,6 +487,9 @@ function createMemoryArchive(initial: ArchiveConnection = "ready") {
     async write(name, contents) {
       files.set(name, contents);
     },
+    async remove(name) {
+      files.delete(name);
+    },
     async list() {
       return [...files].map(([name, text]) => ({ name, text }));
     },
@@ -410,6 +510,10 @@ function createMemoryArchive(initial: ArchiveConnection = "ready") {
       if (connection !== "ready") throw new Error("archive unavailable");
       await writeConversationFile(directory, conversation);
     },
+    async remove(conversation) {
+      if (connection !== "ready") throw new Error("archive unavailable");
+      return removeConversationFile(directory, conversation);
+    },
     async list() {
       if (connection !== "ready") throw new Error("archive unavailable");
       return listConversationFiles(directory);
@@ -417,6 +521,7 @@ function createMemoryArchive(initial: ArchiveConnection = "ready") {
   };
   return {
     archive,
+    directory,
     disconnect() {
       connection = "missing";
     },
@@ -472,6 +577,20 @@ function sampleCapture(): RawCapture {
     title: "経路の題",
     parserVersion: "copilot-1",
     messages,
+  };
+}
+
+function stubConfirm(value: boolean) {
+  const confirm = vi.fn(() => value);
+  vi.stubGlobal("confirm", confirm);
+  return confirm;
+}
+
+function changedCapture(): RawCapture {
+  return {
+    ...sampleCapture(),
+    title: "変えた題",
+    messages: [{ ordinal: 0, role: "user", content: "あとの問い", providerMessageId: "u2" }],
   };
 }
 

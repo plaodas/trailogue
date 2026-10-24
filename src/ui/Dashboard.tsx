@@ -61,6 +61,7 @@ export function Dashboard({ repository, archive, capture, sidebar }: Props) {
   const batchPhase = useRef(batch.phase);
   const batchTab = useRef<number | null>(null);
   const refreshRun = useRef(0);
+  const turn = useRef(Promise.resolve());
   const onStatusRef = useRef<(status: DashboardStatus) => void>(() => {});
   const readTab = useRef<(tabId: number) => Promise<void>>(async () => {});
   repositoryRef.current = repository;
@@ -75,7 +76,20 @@ export function Dashboard({ repository, archive, capture, sidebar }: Props) {
     return next;
   }
 
+  function enqueue(work: () => Promise<void>): Promise<void> {
+    const run = turn.current.then(work, work);
+    turn.current = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
   async function refresh() {
+    await enqueue(() => loadRecords());
+  }
+
+  async function loadRecords() {
     const id = ++refreshRun.current;
     const currentArchive = archiveRef.current;
     const currentRepository = repositoryRef.current;
@@ -459,6 +473,25 @@ export function Dashboard({ repository, archive, capture, sidebar }: Props) {
     void refresh();
   }
 
+  async function deleteRecord(conversation: Conversation) {
+    if ((await archiveRef.current.connection()) !== "ready") return;
+    const confirmed = window.confirm(copy.confirmDelete(conversation.title, conversation.provider));
+    if (!confirmed) return;
+    await enqueue(async () => {
+      if ((await archiveRef.current.connection()) !== "ready") return;
+      await repositoryRef.current.removeByHash(conversation.contentHash);
+      let removed: boolean;
+      try {
+        removed = await archiveRef.current.remove(conversation);
+      } catch {
+        removed = false;
+      }
+      await loadRecords();
+      if (!removed) return;
+      setReading((current) => (current?.contentHash === conversation.contentHash ? null : current));
+    });
+  }
+
   async function openRecord(id: string) {
     const known = records.find((record) => record.id === id);
     if (known) {
@@ -505,13 +538,19 @@ export function Dashboard({ repository, archive, capture, sidebar }: Props) {
           onOpenExisting={() => void openExisting()}
         />
       ) : reading ? (
-        <Reader conversation={reading} onBack={() => setReading(null)} />
+        <Reader
+          conversation={reading}
+          canDelete={archiveConnection === "ready"}
+          onBack={() => setReading(null)}
+          onDelete={() => void deleteRecord(reading)}
+        />
       ) : (
         <RecordList
           records={records}
           connection={archiveConnection}
           unreadable={unreadable}
           onOpen={(id) => void openRecord(id)}
+          onDelete={(record) => void deleteRecord(record)}
           onOpenFolder={() => void openArchiveFolder()}
           message={batchMessage}
           failures={batchFailures}
@@ -735,7 +774,17 @@ function Transcript({ conversation }: { conversation: Conversation }) {
   );
 }
 
-function Reader({ conversation, onBack }: { conversation: Conversation; onBack: () => void }) {
+function Reader({
+  conversation,
+  canDelete,
+  onBack,
+  onDelete,
+}: {
+  conversation: Conversation;
+  canDelete: boolean;
+  onBack: () => void;
+  onDelete: () => void;
+}) {
   const [view, setView] = useState<"original" | "path">("original");
   return (
     <section>
@@ -746,6 +795,7 @@ function Reader({ conversation, onBack }: { conversation: Conversation; onBack: 
         <button type="button" onClick={() => setView("original")}>原文</button>
         <button type="button" onClick={() => setView("path")}>思考経路</button>
         <button type="button" onClick={() => downloadMarkdown(conversation)}>Markdownを書き出す</button>
+        <button type="button" onClick={onDelete} disabled={!canDelete}>{copy.deleteRecord}</button>
       </div>
       {view === "original" ? (
         <Transcript conversation={conversation} />
@@ -776,6 +826,7 @@ function RecordList({
   connection,
   unreadable,
   onOpen,
+  onDelete,
   onOpenFolder,
   message,
   failures,
@@ -785,6 +836,7 @@ function RecordList({
   connection: ArchiveConnection | null;
   unreadable: number;
   onOpen: (id: string) => void;
+  onDelete: (conversation: Conversation) => void;
   onOpenFolder: () => void;
   message: string | null;
   failures: readonly SidebarConversation[];
@@ -814,12 +866,19 @@ function RecordList({
       {records.length === 0 ? <p>保存した会話はまだありません。</p> : null}
       <ul>
         {records.map((record) => (
-          <li key={record.id}>
+          <li key={record.id} className="record-row">
             <button type="button" className="record" onClick={() => onOpen(record.id)}>
               <span>{record.title}</span>
               <span>{record.provider}</span>
               <time dateTime={record.capturedAt}>{record.capturedAt}</time>
               <span>{record.messages.length}件</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onDelete(record)}
+              disabled={connection !== "ready"}
+            >
+              {copy.deleteRecord}
             </button>
           </li>
         ))}
