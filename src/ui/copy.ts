@@ -1,6 +1,7 @@
 import type { CaptureFailureCode } from "../domain/types";
 
 export const copy = {
+  unsupportedBrowser: "Trailogue は Chrome と Edge で動きます。Brave では使えません。",
   unsupported: "CopilotまたはChatGPTの対応会話タブで実行する",
   login: "現在のタブでサインインし、会話を表示する",
   waiting: "現在のタブで会話の表示を待っている",
