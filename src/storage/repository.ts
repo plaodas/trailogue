@@ -1,5 +1,5 @@
 import type { Conversation } from "../domain/types";
-import type { TrailogueDatabase } from "./db";
+import { FOLDER_ALIGNMENT_ID, isFolderAlignment, type TrailogueDatabase } from "./db";
 
 export type ConversationRepository = {
   insert(conversation: Conversation): Promise<Conversation>;
@@ -7,7 +7,10 @@ export type ConversationRepository = {
   list(): Promise<Conversation[]>;
   findById(id: string): Promise<Conversation | undefined>;
   findByHash(contentHash: string): Promise<Conversation | undefined>;
+  findBySource(sourceId: string): Promise<Conversation[]>;
   removeByHash(contentHash: string): Promise<void>;
+  isFolderAligned(): Promise<boolean>;
+  markFolderAligned(): Promise<void>;
 };
 
 export function createRepository(db: TrailogueDatabase): ConversationRepository {
@@ -49,8 +52,17 @@ export function createRepository(db: TrailogueDatabase): ConversationRepository 
       return db.conversations.get(id);
     },
     findByHash,
+    findBySource(sourceId) {
+      return db.conversations.where("sourceId").equals(sourceId).toArray();
+    },
     async removeByHash(contentHash) {
       await db.conversations.where("contentHash").equals(contentHash).delete();
+    },
+    async isFolderAligned() {
+      return isFolderAlignment(await db.archiveHandles.get(FOLDER_ALIGNMENT_ID));
+    },
+    async markFolderAligned() {
+      await db.archiveHandles.put({ id: FOLDER_ALIGNMENT_ID, folderAligned: true });
     },
   };
 }

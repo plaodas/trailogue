@@ -28,7 +28,11 @@ export async function contentHash(input: {
   sourceId: string;
   messages: ReadonlyArray<HashMessage>;
 }): Promise<string> {
-  const bytes = new TextEncoder().encode(canonicalContent(input));
+  return sha256Hex(canonicalContent(input));
+}
+
+export async function sha256Hex(value: string): Promise<string> {
+  const bytes = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))

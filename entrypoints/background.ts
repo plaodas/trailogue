@@ -1,8 +1,15 @@
 import { browser } from "wxt/browser";
 import { defineBackground } from "wxt/utils/define-background";
+import { createFileSystemArchive } from "../src/archive/fileSystemArchive";
 import { isBraveBrandList } from "../src/capture/browserSupport";
+import { createImportBadgeController, type ImportBadge } from "../src/capture/importBadge";
+import { isImportWatchReport } from "../src/capture/importWatch";
 import { createCaptureLauncher } from "../src/capture/launch";
 import { isDashboardReady } from "../src/capture/status";
+import { messageFingerprints } from "../src/domain/importStatus";
+import { alignCache } from "../src/storage/alignCache";
+import { openDatabase } from "../src/storage/db";
+import { createRepository } from "../src/storage/repository";
 import { copy } from "../src/ui/copy";
 
 export default defineBackground(() => {
@@ -23,9 +30,41 @@ export default defineBackground(() => {
     });
   }
 
-  browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (!isDashboardReady(message)) return;
-    sendResponse(launcher.status());
+  const database = openDatabase();
+  const repository = createRepository(database);
+  const archive = createFileSystemArchive(database);
+  const badges = createImportBadgeController({
+    permission: async () => {
+      try {
+        return await archive.connection();
+      } catch {
+        return "missing";
+      }
+    },
+    align: async () => {
+      const listing = await archive.list();
+      await alignCache(repository, listing.conversations);
+    },
+    folderAligned: () => repository.isFolderAligned(),
+    generations: async (provider, sourceId) => {
+      const rows = await repository.findBySource(sourceId);
+      const matched = rows.filter((row) => row.provider === provider);
+      const generations = [];
+      for (const row of matched) generations.push(await messageFingerprints(row.messages));
+      return generations;
+    },
+    show: showBadge,
+  });
+
+  browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (isDashboardReady(message)) {
+      sendResponse(launcher.status());
+      return;
+    }
+    if (blocked || !isImportWatchReport(message)) return;
+    const tabId = sender.tab?.id;
+    if (tabId === undefined) return;
+    void badges.apply(tabId, message);
   });
 
   browser.action.onClicked.addListener((tab) => {
@@ -41,6 +80,14 @@ function clientBrands(): readonly { brand: string }[] | undefined {
   const data = (navigator as Navigator & { userAgentData?: { brands?: readonly { brand: string }[] } })
     .userAgentData;
   return data?.brands;
+}
+
+async function showBadge(tabId: number, badge: ImportBadge): Promise<void> {
+  await browser.action.setBadgeText({ text: badge.text, tabId });
+  if (badge.color) {
+    await browser.action.setBadgeBackgroundColor({ color: badge.color, tabId });
+  }
+  await browser.action.setTitle({ title: badge.title, tabId });
 }
 
 async function openDashboard(): Promise<void> {

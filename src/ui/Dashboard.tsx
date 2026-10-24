@@ -14,6 +14,7 @@ import { transition, type SessionEvent, type SessionState } from "../capture/ses
 import { normalize } from "../domain/normalize";
 import { deriveThoughtPath } from "../domain/thoughtPath";
 import type { CaptureFailureCode, Conversation, MessageRole, ProviderId } from "../domain/types";
+import { alignCache } from "../storage/alignCache";
 import type { ConversationRepository } from "../storage/repository";
 import type { CapturePort, CaptureRead } from "./capturePort";
 import { copy, failureCopy } from "./copy";
@@ -942,17 +943,6 @@ function FailedConversations({ failures }: { failures: readonly SidebarConversat
       </ul>
     </section>
   );
-}
-
-async function alignCache(repository: ConversationRepository, conversations: readonly Conversation[]) {
-  const present = new Set(conversations.map((conversation) => conversation.contentHash));
-  const stored = await repository.list();
-  for (const row of stored) {
-    if (!present.has(row.contentHash)) await repository.removeByHash(row.contentHash);
-  }
-  for (const conversation of conversations) {
-    await repository.mirror(conversation);
-  }
 }
 
 function ArchiveBanner({
