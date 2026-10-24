@@ -70,6 +70,41 @@ describe("folder archive", () => {
     expect(await saved.grant.read(name)).toBe(original);
     expect((await archive.findByHash(conversation.contentHash))?.title).toBe(conversation.title);
   });
+
+  it("removes one verified file and leaves the folder and the other hash", async () => {
+    const saved = memoryGrant("granted");
+    const store = vi.fn(async () => undefined);
+    const archive = createArchive({
+      load: async () => saved.grant,
+      store,
+      pick: async () => saved.grant,
+    });
+    const first = await sample();
+    const second = await sample("あとの問い", "record-2");
+    await archive.write(first);
+    await archive.write(second);
+
+    expect(await archive.remove(first)).toBe(true);
+
+    expect(await saved.grant.read(conversationFileName(first.contentHash))).toBeNull();
+    expect((await archive.findByHash(second.contentHash))?.id).toBe(second.id);
+    expect(store).not.toHaveBeenCalled();
+  });
+
+  it("does not remove a file that fails verification", async () => {
+    const saved = memoryGrant("granted");
+    const archive = createArchive({
+      load: async () => saved.grant,
+      store: async () => undefined,
+      pick: async () => saved.grant,
+    });
+    const conversation = await sample();
+    const name = conversationFileName(conversation.contentHash);
+    await saved.grant.write(name, "{");
+
+    expect(await archive.remove(conversation)).toBe(false);
+    expect(await saved.grant.read(name)).toBe("{");
+  });
 });
 
 function memoryGrant(permission: PermissionState): {
@@ -92,6 +127,9 @@ function memoryGrant(permission: PermissionState): {
     async write(name, contents) {
       files.set(name, contents);
     },
+    async remove(name) {
+      files.delete(name);
+    },
     async list() {
       return [...files].map(([name, text]) => ({ name, text }));
     },
@@ -104,7 +142,7 @@ function memoryGrant(permission: PermissionState): {
   };
 }
 
-function sample(): Promise<Conversation> {
+function sample(content = "初めの問い", id = "record-1"): Promise<Conversation> {
   const raw: RawCapture = {
     provider: "chatgpt",
     sourceUrl: "https://chatgpt.com/c/conversation-1",
@@ -112,7 +150,7 @@ function sample(): Promise<Conversation> {
     sourceKind: "conversation",
     title: "題",
     parserVersion: "chatgpt-1",
-    messages: [{ ordinal: 0, role: "user", content: "初めの問い" }],
+    messages: [{ ordinal: 0, role: "user", content }],
   };
-  return normalize(raw, { id: "record-1", capturedAt: "2026-01-01T00:00:00.000Z" });
+  return normalize(raw, { id, capturedAt: "2026-01-01T00:00:00.000Z" });
 }

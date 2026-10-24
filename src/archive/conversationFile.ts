@@ -4,6 +4,7 @@ import type { Conversation, Message, MessageRole, ProviderId, SourceKind } from 
 export type ArchiveDirectory = {
   read(name: string): Promise<string | null>;
   write(name: string, contents: string): Promise<void>;
+  remove(name: string): Promise<void>;
   list(): Promise<{ name: string; text: string }[]>;
 };
 
@@ -68,6 +69,20 @@ export async function writeConversationFile(
     if (stored && conversationFileName(stored.contentHash) === name) return;
   }
   await directory.write(name, serialized);
+}
+
+export async function removeConversationFile(
+  directory: ArchiveDirectory,
+  conversation: Conversation,
+): Promise<boolean> {
+  const name = conversationFileName(conversation.contentHash);
+  const text = await directory.read(name);
+  if (text === null) return true;
+  const stored = await readConversationFile(text);
+  if (!stored || stored.contentHash !== conversation.contentHash) return false;
+  if (conversationFileName(stored.contentHash) !== name) return false;
+  await directory.remove(name);
+  return true;
 }
 
 export async function listConversationFiles(directory: ArchiveDirectory): Promise<ArchiveListing> {

@@ -43,6 +43,24 @@ describe("conversation repository", () => {
     });
     expect(await db.archiveHandles.get("directory")).toBeUndefined();
   });
+
+  it("removes one hash and leaves the other row and the folder handle", async () => {
+    const db = openDatabase(`trailogue-test-${crypto.randomUUID()}`);
+    databases.push(db);
+    const repository = createRepository(db);
+    const first = await conversation("conversation-1", "初めの問い", "2026-01-01T00:00:00.000Z");
+    const second = await conversation("conversation-1", "あとの問い", "2026-02-01T00:00:00.000Z");
+    await repository.insert(first);
+    await repository.insert(second);
+    await db.archiveHandles.put({ id: "directory", handle: {} as FileSystemDirectoryHandle });
+
+    await repository.removeByHash(first.contentHash);
+
+    expect(await repository.findByHash(first.contentHash)).toBeUndefined();
+    expect((await repository.findByHash(second.contentHash))?.id).toBe(second.id);
+    expect(await repository.list()).toHaveLength(1);
+    expect(await db.archiveHandles.get("directory")).toMatchObject({ id: "directory" });
+  });
 });
 
 function createTestRepository(): ConversationRepository {

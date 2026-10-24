@@ -18,6 +18,9 @@ export const copy = {
   chooseFolder: "記録フォルダを選ぶ",
   reopenFolder: "記録フォルダを開く",
   unreadable: (count: number) => `読めなかったファイルが${count}件あります。`,
+  deleteRecord: "削除",
+  confirmDelete: (title: string, provider: string) =>
+    `「${title}」（${provider}）をフォルダとブラウザ内から消します。`,
   reloading: "ページを読み直して取得しています",
   capturing: "会話を取得しています",
   emptyMessages: (count: number) => `空の本文が${count}件あります。`,

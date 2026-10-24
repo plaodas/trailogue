@@ -2,6 +2,7 @@ import type { TrailogueDatabase } from "../storage/db";
 import {
   findConversationFile,
   listConversationFiles,
+  removeConversationFile,
   writeConversationFile,
   type ArchiveDirectory,
   type ArchiveListing,
@@ -15,6 +16,7 @@ export type ConversationArchive = {
   openFolder(): Promise<ArchiveConnection>;
   findByHash(contentHash: string): Promise<Conversation | undefined>;
   write(conversation: Conversation): Promise<void>;
+  remove(conversation: Conversation): Promise<boolean>;
   list(): Promise<ArchiveListing>;
 };
 
@@ -65,6 +67,9 @@ export function createArchive(port: ArchivePort): ConversationArchive {
     async write(conversation) {
       await writeConversationFile(await readyGrant(), conversation);
     },
+    async remove(conversation) {
+      return removeConversationFile(await readyGrant(), conversation);
+    },
     async list() {
       return listConversationFiles(await readyGrant());
     },
@@ -104,6 +109,7 @@ function grantOf(handle: FileSystemDirectoryHandle): ArchiveDirectoryGrant {
     requestPermission: () => directory.requestPermission({ mode: "readwrite" }),
     read: (name) => readFile(directory, name),
     write: (name, contents) => writeFile(directory, name, contents),
+    remove: (name) => removeFile(handle, name),
     list: () => listJsonFiles(directory),
   };
 }
@@ -136,6 +142,15 @@ async function writeFile(handle: ReadableDirectory, name: string, contents: stri
     await writable.close();
   } catch (error) {
     await writable.abort().catch(() => undefined);
+    throw error;
+  }
+}
+
+async function removeFile(handle: FileSystemDirectoryHandle, name: string): Promise<void> {
+  try {
+    await handle.removeEntry(name);
+  } catch (error) {
+    if (isNotFound(error)) return;
     throw error;
   }
 }

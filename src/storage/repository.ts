@@ -6,6 +6,7 @@ export type ConversationRepository = {
   list(): Promise<Conversation[]>;
   findById(id: string): Promise<Conversation | undefined>;
   findByHash(contentHash: string): Promise<Conversation | undefined>;
+  removeByHash(contentHash: string): Promise<void>;
 };
 
 export function createRepository(db: TrailogueDatabase): ConversationRepository {
@@ -33,5 +34,8 @@ export function createRepository(db: TrailogueDatabase): ConversationRepository 
       return db.conversations.get(id);
     },
     findByHash,
+    async removeByHash(contentHash) {
+      await db.conversations.where("contentHash").equals(contentHash).delete();
+    },
   };
 }
