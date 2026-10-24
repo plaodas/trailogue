@@ -3,6 +3,7 @@ import type { TrailogueDatabase } from "./db";
 
 export type ConversationRepository = {
   insert(conversation: Conversation): Promise<Conversation>;
+  mirror(conversation: Conversation): Promise<Conversation>;
   list(): Promise<Conversation[]>;
   findById(id: string): Promise<Conversation | undefined>;
   findByHash(contentHash: string): Promise<Conversation | undefined>;
@@ -27,6 +28,20 @@ export function createRepository(db: TrailogueDatabase): ConversationRepository 
       }
       return conversation;
     },
+    async mirror(conversation) {
+      const existing = await findByHash(conversation.contentHash);
+      if (!existing) {
+        try {
+          await db.conversations.add(conversation);
+        } catch (error) {
+          const raced = await findByHash(conversation.contentHash);
+          if (!raced) throw error;
+          return replaceCached(db, raced, conversation);
+        }
+        return conversation;
+      }
+      return replaceCached(db, existing, conversation);
+    },
     list() {
       return db.conversations.orderBy("capturedAt").reverse().toArray();
     },
@@ -38,4 +53,20 @@ export function createRepository(db: TrailogueDatabase): ConversationRepository 
       await db.conversations.where("contentHash").equals(contentHash).delete();
     },
   };
+}
+
+async function replaceCached(
+  db: TrailogueDatabase,
+  existing: Conversation,
+  conversation: Conversation,
+): Promise<Conversation> {
+  if (existing.id === conversation.id) {
+    await db.conversations.put(conversation);
+    return conversation;
+  }
+  await db.transaction("rw", db.conversations, async () => {
+    await db.conversations.delete(existing.id);
+    await db.conversations.add(conversation);
+  });
+  return conversation;
 }

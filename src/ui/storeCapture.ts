@@ -18,7 +18,7 @@ export async function storeCapturedConversation(
     await archive.write(conversation);
     const onDisk = await archive.findByHash(conversation.contentHash);
     if (!onDisk) return "failed";
-    await repository.insert(onDisk);
+    await repository.mirror(onDisk);
     return "stored";
   } catch {
     return "failed";

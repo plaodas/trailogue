@@ -48,9 +48,10 @@ describe("Dashboard", () => {
       id: "existing",
       capturedAt: "2026-01-01T00:00:00.000Z",
     });
-    await repository.insert(existing);
+    const memory = createMemoryArchive();
+    await memory.archive.write(existing);
     const port = createPort(async () => ({ ok: true, capture: sampleCapture() }));
-    renderDashboard(repository, port.port);
+    renderDashboard(repository, port.port, memory.archive);
     port.emit(readyStatus());
 
     expect(await screen.findByText("同じ軌跡は保存済みであり、既存の記録へ移れる")).toBeTruthy();
@@ -59,6 +60,7 @@ describe("Dashboard", () => {
     expect(await screen.findByRole("heading", { name: "経路の題" })).toBeTruthy();
     expect(messageBodies()).toEqual(["初めの問い", "一行目\n二行目の全文", ""]);
     expect(await repository.list()).toHaveLength(1);
+    expect((await repository.list())[0]?.id).toBe("existing");
   });
 
   it("returns to the saved list from a preview without opening the original", async () => {
@@ -83,14 +85,19 @@ describe("Dashboard", () => {
       capturedAt: "2026-01-01T00:00:00.000Z",
     });
     await repository.insert(existing);
+    const memory = createMemoryArchive("missing");
     const port = createPort(async () => ({ ok: true, capture: sampleCapture() }));
-    renderDashboard(repository, port.port);
+    renderDashboard(repository, port.port, memory.archive);
     port.emit(readyStatus());
 
     expect(await screen.findByText("同じ軌跡は保存済みであり、既存の記録へ移れる")).toBeTruthy();
+    expect(screen.queryByText("記録フォルダが未選択です。この一覧はブラウザの中にあります。")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "一覧へ戻る" }));
 
-    expect(await screen.findByRole("heading", { name: "保存した会話" })).toBeTruthy();
+    const notice = await screen.findByText("記録フォルダが未選択です。この一覧はブラウザの中にあります。");
+    const heading = screen.getByRole("heading", { name: "保存した会話" });
+    expect(notice.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(notice.closest(".archive-banner")).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "経路の題" })).toBeNull();
     expect(screen.queryByRole("button", { name: "原文" })).toBeNull();
     expect(screen.getByRole("button", { name: /経路の題/ })).toBeTruthy();
@@ -219,7 +226,10 @@ describe("Dashboard", () => {
     const port = createPort(async () => ({ ok: true, capture: sampleCapture() }));
     renderDashboard(repository, port.port, memory.archive);
 
-    expect(await screen.findByText("記録フォルダが未選択です。この一覧はブラウザの中にあります。")).toBeTruthy();
+    const notice = await screen.findByText("記録フォルダが未選択です。この一覧はブラウザの中にあります。");
+    const heading = screen.getByRole("heading", { name: "保存した会話" });
+    expect(notice.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(notice.closest(".archive-banner")).toBeTruthy();
     expect(await repository.list()).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "記録フォルダを選ぶ" }));
 
@@ -231,7 +241,7 @@ describe("Dashboard", () => {
     expect((await repository.list())[0]?.id).toBe("from-folder");
   });
 
-  it("writes working copies that are missing from the folder", async () => {
+  it("drops cache rows that are missing from the folder", async () => {
     const repository = createTestRepository();
     const existing = await normalize(sampleCapture(), {
       id: "cached",
@@ -244,16 +254,74 @@ describe("Dashboard", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "記録フォルダを選ぶ" }));
     await waitFor(async () => {
-      const listing = await memory.archive.list();
-      expect(listing.conversations.map((conversation) => conversation.id)).toEqual(["cached"]);
+      expect(await repository.findByHash(existing.contentHash)).toBeUndefined();
     });
     const listing = await memory.archive.list();
-    expect(listing.conversations.map((conversation) => conversation.id)).toEqual(["cached"]);
-    expect(listing.conversations[0]?.messages.map((message) => message.content)).toEqual([
-      "初めの問い",
-      "一行目\n二行目の全文",
-      "",
-    ]);
+    expect(listing.conversations).toEqual([]);
+  });
+
+  it("does not treat a cache-only row as saved when the folder is readable", async () => {
+    const repository = createTestRepository();
+    const existing = await normalize(sampleCapture(), {
+      id: "cached",
+      capturedAt: "2026-01-01T00:00:00.000Z",
+    });
+    await repository.insert(existing);
+    const memory = createMemoryArchive();
+    const port = createPort(async () => ({ ok: true, capture: sampleCapture() }));
+    renderDashboard(repository, port.port, memory.archive);
+    port.emit(readyStatus());
+
+    expect(await screen.findByText("発言の全文プレビュー")).toBeTruthy();
+    expect(screen.queryByText("同じ軌跡は保存済みであり、既存の記録へ移れる")).toBeNull();
+    await waitFor(async () => {
+      expect(await repository.findByHash(existing.contentHash)).toBeUndefined();
+    });
+    expect((await memory.archive.list()).conversations).toEqual([]);
+  });
+
+  it("imports a folder file added elsewhere and drops one removed elsewhere", async () => {
+    const repository = createTestRepository();
+    const memory = createMemoryArchive();
+    const kept = await normalize(sampleCapture(), {
+      id: "kept",
+      capturedAt: "2026-02-01T00:00:00.000Z",
+    });
+    const dropped = await normalize(changedCapture(), {
+      id: "dropped",
+      capturedAt: "2026-03-01T00:00:00.000Z",
+    });
+    await memory.archive.write(kept);
+    const port = createPort(async () => ({ ok: true, capture: sampleCapture() }));
+    renderDashboard(repository, port.port, memory.archive);
+    expect(await screen.findByRole("button", { name: /経路の題/ })).toBeTruthy();
+
+    await memory.archive.write(dropped);
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(await screen.findByRole("button", { name: /変えた題/ })).toBeTruthy();
+    expect((await repository.findByHash(dropped.contentHash))?.id).toBe("dropped");
+
+    await memory.directory.remove(`${dropped.contentHash}.json`);
+    document.dispatchEvent(new Event("visibilitychange"));
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /変えた題/ })).toBeNull();
+    });
+    expect(await memory.archive.findByHash(dropped.contentHash)).toBeUndefined();
+    expect(await repository.findByHash(dropped.contentHash)).toBeUndefined();
+    expect(screen.getByRole("button", { name: /経路の題/ })).toBeTruthy();
+  });
+
+  it("places the closed-folder warning above the saved conversations", async () => {
+    const repository = createTestRepository();
+    const memory = createMemoryArchive("needs_permission");
+    const port = createPort(async () => ({ ok: true, capture: sampleCapture() }));
+    renderDashboard(repository, port.port, memory.archive);
+
+    const notice = await screen.findByText("記録フォルダを開き直すと、ファイルから一覧を戻します。");
+    const heading = screen.getByRole("heading", { name: "保存した会話" });
+    expect(notice.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(notice.closest(".archive-banner")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "記録フォルダを開く" })).toBeTruthy();
   });
 
   it("retries a loading page for about 10 seconds and then waits", async () => {
