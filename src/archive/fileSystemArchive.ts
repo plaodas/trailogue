@@ -1,4 +1,4 @@
-import type { TrailogueDatabase } from "../storage/db";
+import { isArchiveDirectory, type TrailogueDatabase } from "../storage/db";
 import {
   findConversationFile,
   listConversationFiles,
@@ -88,7 +88,7 @@ export function createFileSystemArchive(db: TrailogueDatabase): ConversationArch
   return createArchive({
     async load() {
       const row = await db.archiveHandles.get(HANDLE_ID);
-      return row ? bind(row.handle) : null;
+      return row && isArchiveDirectory(row) ? bind(row.handle) : null;
     },
     async store(grant) {
       const handle = handles.get(grant);

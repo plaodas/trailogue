@@ -74,6 +74,39 @@ describe("conversation repository", () => {
     expect(await db.archiveHandles.get("directory")).toBeUndefined();
   });
 
+  it("returns every generation for one source id", async () => {
+    const repository = createTestRepository();
+    const first = await conversation("conversation-1", "初めの問い", "2026-01-01T00:00:00.000Z");
+    const second = await conversation("conversation-1", "あとの問い", "2026-02-01T00:00:00.000Z");
+    const other = await conversation("conversation-2", "別の問い", "2026-03-01T00:00:00.000Z");
+    const chatgpt = await conversation("conversation-1", "別provider", "2026-04-01T00:00:00.000Z", "chatgpt");
+    await repository.insert(first);
+    await repository.insert(second);
+    await repository.insert(other);
+    await repository.insert(chatgpt);
+
+    const found = await repository.findBySource("conversation-1");
+
+    expect(found.map((record) => record.id).sort()).toEqual([chatgpt.id, first.id, second.id].sort());
+    expect(found.some((record) => record.provider === "chatgpt")).toBe(true);
+    expect(await repository.isFolderAligned()).toBe(false);
+  });
+
+  it("keeps version 2 rows unaligned after the folder index is added", async () => {
+    const name = `trailogue-test-${crypto.randomUUID()}`;
+    const record = await conversation("conversation-1", "初めの問い", "2026-01-01T00:00:00.000Z");
+    await seedVersion2(name, record);
+
+    const db = openDatabase(name);
+    databases.push(db);
+    const repository = createRepository(db);
+    expect(await repository.findById(record.id)).toMatchObject({
+      messages: [{ content: "初めの問い" }],
+    });
+    expect(await repository.isFolderAligned()).toBe(false);
+    expect(await db.archiveHandles.get("directory")).toMatchObject({ id: "directory" });
+  });
+
   it("removes one hash and leaves the other row and the folder handle", async () => {
     const db = openDatabase(`trailogue-test-${crypto.randomUUID()}`);
     databases.push(db);
@@ -99,17 +132,51 @@ function createTestRepository(): ConversationRepository {
   return createRepository(db);
 }
 
-function conversation(sourceId: string, content: string, capturedAt: string): Promise<Conversation> {
+function conversation(
+  sourceId: string,
+  content: string,
+  capturedAt: string,
+  provider: RawCapture["provider"] = "copilot",
+): Promise<Conversation> {
   const raw: RawCapture = {
-    provider: "copilot",
-    sourceUrl: `https://copilot.cloud.microsoft/chat/conversation/${sourceId}`,
+    provider,
+    sourceUrl: provider === "copilot"
+      ? `https://copilot.cloud.microsoft/chat/conversation/${sourceId}`
+      : `https://chatgpt.com/c/${sourceId}`,
     sourceId,
     sourceKind: "conversation",
     title: "題",
-    parserVersion: "copilot-1",
+    parserVersion: provider === "copilot" ? "copilot-1" : "chatgpt-1",
     messages: [{ ordinal: 0, role: "user", content }],
   };
   return normalize(raw, { id: crypto.randomUUID(), capturedAt });
+}
+
+function seedVersion2(name: string, record: Conversation): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(name, 20);
+    request.onerror = () => reject(request.error);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      const store = db.createObjectStore("conversations", { keyPath: "id" });
+      store.createIndex("provider", "provider");
+      store.createIndex("sourceId", "sourceId");
+      store.createIndex("contentHash", "contentHash", { unique: true });
+      store.createIndex("capturedAt", "capturedAt");
+      db.createObjectStore("archiveHandles", { keyPath: "id" });
+    };
+    request.onsuccess = () => {
+      const db = request.result;
+      const tx = db.transaction(["conversations", "archiveHandles"], "readwrite");
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => reject(tx.error);
+      tx.objectStore("conversations").add(record);
+      tx.objectStore("archiveHandles").add({ id: "directory", handle: {} });
+    };
+  });
 }
 
 function seedVersion1(name: string, record: Conversation): Promise<void> {

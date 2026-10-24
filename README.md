@@ -49,7 +49,7 @@ adapterが依存している形式は次です。fixtureは実ページの保存
 - ChatGPT共有会話: `script#__WEB_MOBILE_DATA__` の `conversation.messages`。`role` は `user` と `assistant`、本文は `content`。
 - ChatGPT通常会話: `data-chatgpt-search-message-ids`、見出し「あなたの発言:」、`data-conversation-role="assistant"`。ユーザー本文は `data-search-result-target`、assistant本文は `data-markdown-text-style="assistant-message"`。assistant本文が空のとき、または発言がまだ無く同じ会話の入力欄と空の本文枠だけがあるときは描画待ちにし、空の発言として保存しない。
 
-Copilotの content script は `document_start` で hydration script のテキストを保持する。解釈と応答は、拡張機能のボタンによる取得要求のときだけ行う。保持するのは、今開いている文書の最初のHTMLである。そのタブの中で足した発言は、ページを自分で読み直すまで取得に入らない。
+Copilotの content script は `document_start` で hydration script のテキストを保持する。保持するのは、今開いている文書の最初のHTMLである。そのタブの中で足した発言は、ページを自分で読み直すまで取得に入らない。ページを開いたときの照合もこの保持を読む。保存は、拡張機能のボタンを押したときだけ行う。
 
 ## 未確認のprovider依存
 
