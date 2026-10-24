@@ -31,6 +31,36 @@ describe("conversation repository", () => {
     });
   });
 
+  it("replaces the cached row with the folder conversation for the same hash", async () => {
+    const db = openDatabase(`trailogue-test-${crypto.randomUUID()}`);
+    databases.push(db);
+    const repository = createRepository(db);
+    const cached = await conversation("conversation-1", "初めの問い", "2026-01-01T00:00:00.000Z");
+    const other = await conversation("conversation-1", "あとの問い", "2026-02-01T00:00:00.000Z");
+    await repository.insert(cached);
+    await repository.insert(other);
+    await db.archiveHandles.put({ id: "directory", handle: {} as FileSystemDirectoryHandle });
+    const filed = {
+      ...cached,
+      id: "from-file",
+      title: "ファイルの題",
+      capturedAt: "2026-04-01T00:00:00.000Z",
+    };
+
+    const mirrored = await repository.mirror(filed);
+
+    expect(mirrored.id).toBe("from-file");
+    expect(await repository.findByHash(cached.contentHash)).toMatchObject({
+      id: "from-file",
+      title: "ファイルの題",
+      capturedAt: "2026-04-01T00:00:00.000Z",
+    });
+    expect(await repository.findById(cached.id)).toBeUndefined();
+    expect((await repository.findByHash(other.contentHash))?.id).toBe(other.id);
+    expect(await repository.list()).toHaveLength(2);
+    expect(await db.archiveHandles.get("directory")).toMatchObject({ id: "directory" });
+  });
+
   it("keeps version 1 conversations when the archive table is added", async () => {
     const name = `trailogue-test-${crypto.randomUUID()}`;
     const record = await conversation("conversation-1", "初めの問い", "2026-01-01T00:00:00.000Z");

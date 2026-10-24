@@ -109,14 +109,10 @@ export function Dashboard({ repository, archive, capture, sidebar }: Props) {
         setRecords(stored);
         return;
       }
-      await copyMissingToFolder(currentArchive, currentRepository);
-      if (id !== refreshRun.current) return;
       const listing = await currentArchive.list();
       if (id !== refreshRun.current) return;
-      for (const conversation of listing.conversations) {
-        await currentRepository.insert(conversation);
-        if (id !== refreshRun.current) return;
-      }
+      await alignCache(currentRepository, listing.conversations);
+      if (id !== refreshRun.current) return;
       setUnreadable(listing.unreadable);
       setRecords(listing.conversations);
     } catch {
@@ -163,8 +159,11 @@ export function Dashboard({ repository, archive, capture, sidebar }: Props) {
           archiveRef.current.findByHash(normalized.contentHash),
           archiveRef.current.list(),
         ]);
-        stored = fromArchive ?? fromDexie;
-        all = mergeConversations(listing.conversations, cached);
+        if (current !== attempt.current || sessionRef.current !== "inspecting") return;
+        await alignCache(repositoryRef.current, listing.conversations);
+        if (current !== attempt.current || sessionRef.current !== "inspecting") return;
+        stored = fromArchive;
+        all = listing.conversations;
         setUnreadable(listing.unreadable);
       }
     } catch {
@@ -221,6 +220,14 @@ export function Dashboard({ repository, archive, capture, sidebar }: Props) {
 
   useEffect(() => {
     void refresh();
+  }, [repository, archive]);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
   }, [repository, archive]);
 
   useEffect(() => {
@@ -295,7 +302,9 @@ export function Dashboard({ repository, archive, capture, sidebar }: Props) {
         if (opened !== "ready") throw new Error("archive unavailable");
       }
       if (live() !== "saving") return;
-      await copyMissingToFolder(archiveRef.current, repositoryRef.current);
+      const before = await archiveRef.current.list();
+      if (live() !== "saving") return;
+      await alignCache(repositoryRef.current, before.conversations);
       if (live() !== "saving") return;
       const conversation = await normalize(captureOf(raw), {
         id: crypto.randomUUID(),
@@ -305,7 +314,7 @@ export function Dashboard({ repository, archive, capture, sidebar }: Props) {
       await archiveRef.current.write(conversation);
       const onDisk = await archiveRef.current.findByHash(conversation.contentHash);
       if (!onDisk) throw new Error("archive missing");
-      await repositoryRef.current.insert(onDisk);
+      await repositoryRef.current.mirror(onDisk);
       if (live() !== "saving") return;
       const listing = await archiveRef.current.list();
       if (live() !== "saving") return;
@@ -359,10 +368,9 @@ export function Dashboard({ repository, archive, capture, sidebar }: Props) {
 
   async function openExisting() {
     if (!existing || sessionRef.current !== "duplicate") return;
-    const stored = await repositoryRef.current.findById(existing.id);
-    if (!stored) await repositoryRef.current.insert(existing);
+    const stored = await repositoryRef.current.mirror(existing);
     if (sessionRef.current !== "duplicate") return;
-    setReading(stored ?? existing);
+    setReading(stored);
     move({ type: "open_existing" });
   }
 
@@ -844,23 +852,12 @@ function RecordList({
 }) {
   return (
     <section>
+      <ArchiveBanner connection={connection} onOpenFolder={onOpenFolder} />
       <h2>保存した会話</h2>
       {message ? <p>{message}</p> : null}
       <FailedConversations failures={failures} />
       {onImport ? (
         <button type="button" onClick={onImport}>{copy.batchStart}</button>
-      ) : null}
-      {connection === "missing" ? (
-        <>
-          <p>{copy.folderMissing}</p>
-          <button type="button" onClick={onOpenFolder}>{copy.chooseFolder}</button>
-        </>
-      ) : null}
-      {connection === "needs_permission" ? (
-        <>
-          <p>{copy.folderClosed}</p>
-          <button type="button" onClick={onOpenFolder}>{copy.reopenFolder}</button>
-        </>
       ) : null}
       {unreadable > 0 ? <p className="warning">{copy.unreadable(unreadable)}</p> : null}
       {records.length === 0 ? <p>保存した会話はまだありません。</p> : null}
@@ -947,20 +944,32 @@ function FailedConversations({ failures }: { failures: readonly SidebarConversat
   );
 }
 
-async function copyMissingToFolder(archive: ConversationArchive, repository: ConversationRepository) {
-  const listing = await archive.list();
-  const present = new Set(listing.conversations.map((conversation) => conversation.contentHash));
+async function alignCache(repository: ConversationRepository, conversations: readonly Conversation[]) {
+  const present = new Set(conversations.map((conversation) => conversation.contentHash));
   const stored = await repository.list();
-  for (const conversation of stored) {
-    if (!present.has(conversation.contentHash)) await archive.write(conversation);
+  for (const row of stored) {
+    if (!present.has(row.contentHash)) await repository.removeByHash(row.contentHash);
+  }
+  for (const conversation of conversations) {
+    await repository.mirror(conversation);
   }
 }
 
-function mergeConversations(files: Conversation[], cached: Conversation[]): Conversation[] {
-  const byHash = new Map<string, Conversation>();
-  for (const conversation of cached) byHash.set(conversation.contentHash, conversation);
-  for (const conversation of files) byHash.set(conversation.contentHash, conversation);
-  return [...byHash.values()].sort((left, right) => right.capturedAt.localeCompare(left.capturedAt));
+function ArchiveBanner({
+  connection,
+  onOpenFolder,
+}: {
+  connection: ArchiveConnection | null;
+  onOpenFolder: () => void;
+}) {
+  if (connection !== "missing" && connection !== "needs_permission") return null;
+  const closed = connection === "needs_permission";
+  return (
+    <div className="archive-banner">
+      <p>{closed ? copy.folderClosed : copy.folderMissing}</p>
+      <button type="button" onClick={onOpenFolder}>{closed ? copy.reopenFolder : copy.chooseFolder}</button>
+    </div>
+  );
 }
 
 function roleLabel(provider: ProviderId, role: MessageRole): string {
