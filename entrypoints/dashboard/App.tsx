@@ -1,4 +1,5 @@
 import { createFileSystemArchive } from "../../src/archive/fileSystemArchive";
+import { BrowserGate, detectBrave } from "../../src/ui/browserGate";
 import { Dashboard } from "../../src/ui/Dashboard";
 import { openDatabase } from "../../src/storage/db";
 import { createRepository } from "../../src/storage/repository";
@@ -11,11 +12,13 @@ const archive = createFileSystemArchive(database);
 
 export function App() {
   return (
-    <Dashboard
-      repository={repository}
-      archive={archive}
-      capture={extensionCapture}
-      sidebar={extensionBatch}
-    />
+    <BrowserGate detect={detectBrave}>
+      <Dashboard
+        repository={repository}
+        archive={archive}
+        capture={extensionCapture}
+        sidebar={extensionBatch}
+      />
+    </BrowserGate>
   );
 }
