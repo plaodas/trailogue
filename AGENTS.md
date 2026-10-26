@@ -111,3 +111,4 @@ Trailogueが独自に持つのは、埋め込みデータ優先の取得、本�
 - [方法](docs/METHOD.md)
 - [アーキテクチャ](docs/ARCHITECTURE.md)
 - [Cursor実装プロンプト](docs/IMPLEMENTATION_PROMPT.md)
+- [再会](docs/DIRECTION.md)。実装契約ではない。保存の次に見ている方向である。

@@ -6,6 +6,7 @@
   "include": [
     "src",
     "entrypoints",
+    "desk",
     "tests",
     "wxt.config.ts",
     "vitest.config.ts",
