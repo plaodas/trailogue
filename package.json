@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "desk": "tsx desk/server.ts",
     "postinstall": "wxt prepare"
   },
   "dependencies": {
@@ -22,12 +23,15 @@
     "@testing-library/react": "16.3.3",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
     "@wxt-dev/module-react": "1.2.2",
     "eslint": "10.13.0",
     "fake-indexeddb": "6.2.6",
     "happy-dom": "21.0.4",
+    "tsx": "^4.23.15",
     "typescript": "5.9.3",
     "typescript-eslint": "8.72.0",
+    "vite": "^8.3.5",
     "vitest": "5.0.5",
     "wxt": "0.21.4"
   }

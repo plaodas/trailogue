@@ -1,0 +1,176 @@
+body {
+  margin: 0;
+  background: #f7f4ee;
+  color: #1c1917;
+  font-family: "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.desk {
+  display: grid;
+  grid-template-columns: 8rem minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.months {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 1.5rem 0.75rem;
+  border-right: 1px solid #e7e5e4;
+}
+
+.months button {
+  padding: 0.15rem 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  color: #78716c;
+}
+
+.months button[aria-current="true"] {
+  color: #1c1917;
+}
+
+.stage {
+  padding: 2rem 3rem 3rem 2.5rem;
+}
+
+.quiet {
+  margin: 0 0 1.5rem;
+  color: #78716c;
+}
+
+.warning {
+  color: #9a3412;
+}
+
+.entrance {
+  display: grid;
+  grid-template-columns: minmax(0, 36rem) minmax(12rem, 18rem);
+  align-items: end;
+  gap: 2.5rem;
+  min-height: 70vh;
+}
+
+.face,
+.day-face {
+  position: relative;
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: #fffdf8;
+  border: 0;
+  box-shadow: var(--stack, none);
+}
+
+.face {
+  padding: 2.5rem 2rem 2rem;
+  font-size: 2rem;
+  line-height: 1.35;
+}
+
+.day-face {
+  padding: 1.25rem 1.25rem 1rem;
+  font-size: 1.25rem;
+}
+
+.face small,
+.day-face small,
+.back-card small,
+.flip-meta {
+  display: block;
+  margin-top: 1rem;
+  color: #78716c;
+  font-size: 0.9rem;
+}
+
+.days {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.back-card {
+  justify-self: end;
+  width: 100%;
+  padding: 1.25rem;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: #44403c;
+  font-size: 1rem;
+}
+
+.flip {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 5rem);
+  min-height: 0;
+}
+
+.riffle {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-snap-type: y mandatory;
+  display: flex;
+  flex-direction: column;
+}
+
+.riffle-item {
+  flex: 0 0 100%;
+  min-height: 0;
+  overflow: hidden;
+  scroll-snap-align: start;
+  scroll-snap-stop: normal;
+  box-sizing: border-box;
+}
+
+.flip-title {
+  max-width: 40rem;
+  margin: 3rem 0 0.5rem;
+  font-size: 2.4rem;
+  line-height: 1.3;
+  font-weight: 500;
+}
+
+.rings,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin: 1.25rem 0;
+}
+
+.rings button,
+.actions button {
+  border: 0;
+  background: transparent;
+  padding: 0.2rem 0;
+}
+
+.rings button[aria-current="true"] {
+  text-decoration: underline;
+  text-underline-offset: 0.35rem;
+}
+
+.message-role {
+  margin: 1.5rem 0 0.25rem;
+  color: #78716c;
+}
+
+pre.message {
+  white-space: pre-wrap;
+  font-family: inherit;
+  margin: 0;
+}
