@@ -14,6 +14,7 @@ import {
   type DeskRecord,
   type OpenedMarks,
 } from "../src/desk/album";
+import { markQuery, matchingLines, type TextMatch } from "../src/search/text";
 
 type Album = {
   unreadable: number;
@@ -28,15 +29,26 @@ type Flip = {
   ring: number;
 };
 
+type ReadingOrigin =
+  | { kind: "flip"; flip: Flip }
+  | { kind: "search"; query: string };
+
 type Screen =
   | { kind: "home" }
   | { kind: "month"; month: string }
   | { kind: "flip"; flip: Flip }
-  | { kind: "reading"; flip: Flip; conversation: Conversation };
+  | { kind: "search"; query: string }
+  | {
+      kind: "reading";
+      origin: ReadingOrigin;
+      conversation: Conversation;
+      focusMessageId: string | null;
+    };
 
 export function Desk() {
   const [album, setAlbum] = useState<Album | null>(null);
   const [screen, setScreen] = useState<Screen>({ kind: "home" });
+  const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -60,13 +72,24 @@ export function Desk() {
   const unread = unopenedCovers(covers, album.opened);
 
   function home() {
+    setQuery("");
     setScreen({ kind: "home" });
   }
 
   function openMonth(month: string) {
+    setQuery("");
     setScreen((current) =>
       current.kind === "month" && current.month === month ? { kind: "home" } : { kind: "month", month },
     );
+  }
+
+  function onQuery(next: string) {
+    setQuery(next);
+    if (next.trim() === "") {
+      setScreen({ kind: "home" });
+      return;
+    }
+    setScreen({ kind: "search", query: next });
   }
 
   function startFlip(next: Cover[]) {
@@ -75,31 +98,49 @@ export function Desk() {
     setScreen({ kind: "flip", flip: { covers: next, index: 0, ring: first.rings.length - 1 } });
   }
 
+  async function openSaved(id: string, contentHash: string): Promise<Conversation | null> {
+    const marked = await fetch("/api/opened", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ contentHash }),
+    });
+    if (!marked.ok) {
+      setError("開いた印を置けませんでした");
+      return null;
+    }
+    const payload = (await marked.json()) as { opened: OpenedMarks };
+    const read = await fetch(`/api/conversations/${encodeURIComponent(id)}`);
+    if (!read.ok) {
+      setError("本文を読めませんでした");
+      return null;
+    }
+    const conversation = (await read.json()) as Conversation;
+    setAlbum((current) => (current ? { ...current, opened: payload.opened } : current));
+    return conversation;
+  }
+
   async function openBody(flip: Flip) {
     const cover = flip.covers[flip.index];
     const ring = cover?.rings[flip.ring];
     if (!ring) return;
-    const marked = await fetch("/api/opened", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ contentHash: ring.contentHash }),
+    const conversation = await openSaved(ring.id, ring.contentHash);
+    if (!conversation) return;
+    setScreen({ kind: "reading", origin: { kind: "flip", flip }, conversation, focusMessageId: null });
+  }
+
+  async function openMatch(match: TextMatch, searchQuery: string) {
+    const conversation = await openSaved(match.conversationId, match.contentHash);
+    if (!conversation) return;
+    setScreen({
+      kind: "reading",
+      origin: { kind: "search", query: searchQuery },
+      conversation,
+      focusMessageId: match.messageId,
     });
-    if (!marked.ok) {
-      setError("開いた印を置けませんでした");
-      return;
-    }
-    const payload = (await marked.json()) as { opened: OpenedMarks };
-    const read = await fetch(`/api/conversations/${encodeURIComponent(ring.id)}`);
-    if (!read.ok) {
-      setError("本文を読めませんでした");
-      return;
-    }
-    const conversation = (await read.json()) as Conversation;
-    setAlbum((current) => (current ? { ...current, opened: payload.opened } : current));
-    setScreen({ kind: "reading", flip, conversation });
   }
 
   const selectedMonth = screen.kind === "month" ? screen.month : null;
+  const showSeek = screen.kind === "home" || screen.kind === "month" || screen.kind === "search";
 
   return (
     <div className="desk">
@@ -119,10 +160,21 @@ export function Desk() {
         {album.unreadable > 0 ? (
           <p className="warning">読めなかったファイルが{album.unreadable}件あります。</p>
         ) : null}
+        {showSeek ? <Seek query={query} onQuery={onQuery} /> : null}
         {screen.kind === "reading" ? (
           <Reading
             conversation={screen.conversation}
-            onBack={() => setScreen({ kind: "flip", flip: screen.flip })}
+            focusMessageId={screen.focusMessageId}
+            query={screen.origin.kind === "search" ? screen.origin.query : null}
+            backLabel={screen.origin.kind === "search" ? "結果へ戻る" : "表紙へ戻る"}
+            onBack={() => {
+              if (screen.origin.kind === "search") {
+                setQuery(screen.origin.query);
+                setScreen({ kind: "search", query: screen.origin.query });
+                return;
+              }
+              setScreen({ kind: "flip", flip: screen.origin.flip });
+            }}
             onHome={home}
           />
         ) : screen.kind === "flip" ? (
@@ -132,6 +184,12 @@ export function Desk() {
             onChange={setScreen}
             onOpen={() => void openBody(screen.flip)}
             onHome={home}
+          />
+        ) : screen.kind === "search" ? (
+          <SearchResults
+            query={screen.query}
+            timeZone={album.timeZone}
+            onOpen={(match) => void openMatch(match, screen.query)}
           />
         ) : (
           <Entrance
@@ -147,6 +205,80 @@ export function Desk() {
         )}
       </main>
     </div>
+  );
+}
+
+function Seek({ query, onQuery }: { query: string; onQuery: (query: string) => void }) {
+  return (
+    <label className="seek">
+      <span>本文から探す</span>
+      <input
+        type="search"
+        value={query}
+        spellCheck={false}
+        autoComplete="off"
+        onChange={(event) => onQuery(event.target.value)}
+      />
+    </label>
+  );
+}
+
+function SearchResults({
+  query,
+  timeZone,
+  onOpen,
+}: {
+  query: string;
+  timeZone: string;
+  onOpen: (match: TextMatch) => void;
+}) {
+  const [matches, setMatches] = useState<TextMatch[] | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setFailed(false);
+    setMatches(null);
+    void fetch(`/api/search?q=${encodeURIComponent(query)}`, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("search failed");
+        const body = (await response.json()) as { matches: TextMatch[] };
+        setMatches(body.matches);
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setFailed(true);
+      });
+    return () => controller.abort();
+  }, [query]);
+
+  if (failed) return <p className="warning">本文を探せませんでした</p>;
+  if (!matches) return <p className="quiet">本文を探しています</p>;
+  if (matches.length === 0) return <p className="quiet">この文字列を含む発言はありません</p>;
+  return (
+    <ul className="hits">
+      {matches.map((match) => (
+        <li key={`${match.conversationId}:${match.messageId}`}>
+          <button type="button" className="hit" onClick={() => onOpen(match)}>
+            <span className="hit-title">{match.title}</span>
+            <span className="hit-meta">
+              {roleLabel(match.provider, match.role)} {localDay(match.capturedAt, timeZone)}
+            </span>
+            {matchingLines(match.content, query).map((line, index) => (
+              <span key={index} className="hit-line">
+                <MarkedText text={line} query={query} />
+              </span>
+            ))}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function MarkedText({ text, query }: { text: string; query: string }) {
+  return markQuery(text, query).map((span, index) =>
+    span.match ? <mark key={index}>{span.text}</mark> : <span key={index}>{span.text}</span>,
   );
 }
 
@@ -309,26 +441,51 @@ function FlipView({
 
 function Reading({
   conversation,
+  focusMessageId,
+  query,
+  backLabel,
   onBack,
   onHome,
 }: {
   conversation: Conversation;
+  focusMessageId: string | null;
+  query: string | null;
+  backLabel: string;
   onBack: () => void;
   onHome: () => void;
 }) {
+  const focusRef = useRef<HTMLElement>(null);
+
+  useLayoutEffect(() => {
+    focusRef.current?.scrollIntoView({ block: "start" });
+  }, [conversation.id, focusMessageId]);
+
+  const fromSearch = query !== null;
   return (
-    <section>
+    <section className={fromSearch ? "reading-from-search" : undefined}>
       <div className="actions">
         <button type="button" onClick={onHome}>玄関</button>
-        <button type="button" onClick={onBack}>表紙へ戻る</button>
+        {fromSearch ? null : <button type="button" onClick={onBack}>{backLabel}</button>}
       </div>
+      {fromSearch ? (
+        <button type="button" className="back-float" onClick={onBack}>{backLabel}</button>
+      ) : null}
       <h1 className="flip-title">{conversation.title}</h1>
-      {conversation.messages.map((message) => (
-        <article key={message.id}>
-          <p className="message-role">{roleLabel(conversation.provider, message.role)}</p>
-          <pre className="message">{message.content}</pre>
-        </article>
-      ))}
+      {conversation.messages.map((message) => {
+        const focused = message.id === focusMessageId;
+        return (
+          <article
+            key={message.id}
+            ref={focused ? focusRef : undefined}
+            className={focused ? "reading-focus" : undefined}
+          >
+            <p className="message-role">{roleLabel(conversation.provider, message.role)}</p>
+            <pre className="message">
+              {focused && query ? <MarkedText text={message.content} query={query} /> : message.content}
+            </pre>
+          </article>
+        );
+      })}
     </section>
   );
 }

@@ -31,7 +31,7 @@ flowchart LR
 - happy-dom
 - fake-indexeddb
 
-パッケージマネージャはnpmを使う。バックエンド、ホスト型データベース、LLM APIは置かない。
+パッケージマネージャはnpmを使う。バックエンド、ホスト型データベース、外部のLLM APIは置かない。似た言葉の検索だけ、利用者がローカルで動かしている Ollama の embedding API を呼ぶ。送り先は `http://127.0.0.1:11434` だけである。
 
 ブラウザ操作のボタンはpopupを持たない。対応会話タブでクリックしたら、そのタブを読み直さず取得要求を送る。`dashboard.html` を通常タブで開き、結果を表示する。ダッシュボードが既に開いていれば、そのタブを前面にする。別のURLへは移さず、取得元タブの開閉はしない。Copilotは、そのタブを開いたときの最初のHTMLに含まれた hydration を使う。開いたあと足した発言は、利用者がページを読み直すまで取得に入らない。
 
@@ -46,6 +46,9 @@ flowchart TD
     ui --> archive["src/archive"]
     ui --> exportMd["src/export"]
     ui --> domain["src/domain"]
+    ui --> search["src/search"]
+    search --> domain
+    search --> storage
     capture --> domain
     storage --> domain
     archive --> storage
@@ -56,7 +59,7 @@ flowchart TD
     entry --> ui
 ```
 
-`src/domain` はブラウザAPI、DOM、Dexie、Reactをimportしない。`src/providers` はDexieとReactをimportしない。providerのHTML解釈は `src/providers` の外へ出さない。
+`src/domain` はブラウザAPI、DOM、Dexie、Reactをimportしない。`src/providers` はDexieとReactをimportしない。providerのHTML解釈は `src/providers` の外へ出さない。一致判定と、ベクトルが揃ったあとの近傍の並びは `src/search` の純粋関数とし、ブラウザAPI、DOM、Dexie、React、OllamaへのHTTPをimportしない。OllamaへのHTTPは `src/search/ollama.ts` だけが行う。検索は `src/providers` をimportしない。
 
 ## ディレクトリ
 
@@ -92,6 +95,10 @@ src/
     fileSystemArchive.ts
   export/
     markdown.ts
+  search/
+    text.ts
+    rank.ts
+    ollama.ts
   ui/
 tests/
   fixtures/copilot/
@@ -115,6 +122,7 @@ manifest: {
   host_permissions: [
     "https://copilot.cloud.microsoft/*",
     "https://chatgpt.com/*",
+    "http://127.0.0.1:11434/*",
   ],
 }
 ```
@@ -261,9 +269,17 @@ conversations: "id, provider, sourceId, &contentHash, capturedAt"
 archiveHandles: "id, folderAligned"
 ```
 
-`archiveHandles` はversion 2で足す。中身は選んだフォルダのハンドル1件である。version 3は同じテーブルに `folderAligned` を足す。新しいテーブルは作らない。フォルダからキャッシュを揃えたときだけ、揃った印をこのテーブルに残す。印が無いキャッシュは、取り込み済の判定に使わない。repositoryは `Conversation` だけを受け取る。`insert` は挿入前にハッシュで検索し、既存があれば既存を返す。上書き更新はしない。ファイルの有効な JSON も上書きしない。キャッシュをフォルダへ合わせるときだけ、同じ `contentHash` の行を、読めたファイルの `Conversation` で置き換える。物理削除は、利用者が一覧で選んだ1件の検証できた JSON に限る。その JSON を消せたとき、同じハッシュのキャッシュ行も消す。JSON が残ったときは、その JSON からキャッシュへ戻す。同じ `sourceId` の別ハッシュ、検証に失敗したファイル、フォルダハンドルは残す。検証できた JSON、別ハッシュ、検証に失敗したファイル、フォルダハンドルを、利用者の明示以外で消さない。キャッシュ行は記録ではない。フォルダが読めるとき、検証できたファイルに無いキャッシュ行は外してよい。フォルダが読めないときは、キャッシュも消さない。Dexieへの挿入は、フォルダへ書けたあとで行う。再表示と削除は同時に走らせない。
+`archiveHandles` はversion 2で足す。中身は選んだフォルダのハンドル1件である。version 3は同じテーブルに `folderAligned` を足す。フォルダ整合のために新しいテーブルは作らない。フォルダからキャッシュを揃えたときだけ、揃った印をこのテーブルに残す。印が無いキャッシュは、取り込み済の判定に使わない。repositoryは `Conversation` だけを受け取る。`insert` は挿入前にハッシュで検索し、既存があれば既存を返す。上書き更新はしない。ファイルの有効な JSON も上書きしない。キャッシュをフォルダへ合わせるときだけ、同じ `contentHash` の行を、読めたファイルの `Conversation` で置き換える。物理削除は、利用者が一覧で選んだ1件の検証できた JSON に限る。その JSON を消せたとき、同じハッシュのキャッシュ行も消す。JSON が残ったときは、その JSON からキャッシュへ戻す。同じ `sourceId` の別ハッシュ、検証に失敗したファイル、フォルダハンドルは残す。検証できた JSON、別ハッシュ、検証に失敗したファイル、フォルダハンドルを、利用者の明示以外で消さない。キャッシュ行は記録ではない。フォルダが読めるとき、検証できたファイルに無いキャッシュ行は外してよい。フォルダが読めないときは、キャッシュも消さない。Dexieへの挿入は、フォルダへ書けたあとで行う。再表示と削除は同時に走らせない。
 
 未保存プレビューはReactの状態に置く。フォルダに書けなかったあとでも、その状態から `toMarkdown` を呼べるようにする。経路とMarkdownは、ファイルから読んだ `Conversation` から毎回作る。
+
+## 再訪
+
+再訪の契約は [方法](METHOD.md) に従う。検索が読むのは、検証できた `Conversation` だけである。未保存プレビューは検索しない。
+
+一致判定は `src/search/text.ts`、近傍の並びは `src/search/rank.ts` に置く。どちらも保存済み本文を書き換えない。Ollama が返すベクトルの次元とモデル名は契約で固定しない。契約が固定するのは次である。原本に書かない。送り先は `http://127.0.0.1:11434` だけである。応答が無いとき、似た言葉を成功にしない。ヒットは記録と発言の位置である。
+
+索引とベクトルを作業用データベースに置くときは、`conversations` とも `archiveHandles` とも別のテーブルにする。そのとき schema version を上げる。中身は `contentHash` と発言の位置に紐づく派生物である。repository の `insert` は `Conversation` だけを受け取る。索引の書き込みは、その `insert` に乗せない。索引から JSON は作らない。フォルダが読めたとき、検証できたファイルに無い索引は外す。フォルダが読めないときは消さない。利用者が記録を消したとき、同じ `contentHash` の索引も消す。
 
 ## adapter契約
 
@@ -313,6 +329,8 @@ fixtureへはこの契約を再現する最小データだけを置く。convers
 - 思考経路
 - Markdownの書き出し
 
+一致検索は机にある。クエリが空のあいだ、玄関は今のままである。ヒットを選ぶと、その発言がある経路を開く。拡張のダッシュボードは採取と一覧のままである。
+
 一覧の各行は、タイトル、provider、取得日時、発言数を示す。同じ `sourceId` の記録が複数あれば、取得日時で区別する。各行と、開いている記録から、その1件を削除できる。削除の前にタイトルと provider を確認する。フォルダが読めないときは削除できない。フォルダが未選択のとき、および権限が切れているときは、一覧の上部にその状態とフォルダを開く操作を出す。プレビューには出さない。
 
 会話ページを開いたとき、および同じ文書内の遷移で、そのタブのツールバーに取り込み状態を出す。保存はしない。フォルダの権限が `granted` で、キャッシュをそのフォルダから揃えたときだけ、済、未、差を出す。差のツールチップは、増えた、表示が短い、途中の窓、内容が変わったを分ける。描画待ちは確認中、全件を確認できないページは照合できない、フォルダを読めないときは未確認とする。未確認のときは、キャッシュに同じ `sourceId` があっても未取り込みとは出さない。会話ページでなくなったタブのバッジは消す。Braveのバッジは変えない。サービスワーカーの生存中、フォルダ一覧からの揃えは一度だけ行う。失敗したときは、次の照合で揃え直す。
@@ -342,6 +360,10 @@ fixtureへはこの契約を再現する最小データだけを置く。convers
 - フォルダが読めたとき、ファイルが無いキャッシュ行は消え、その行から JSON を作らないこと
 - 同じハッシュのキャッシュ行は、読めたファイルの `Conversation` で置き換わること
 - フォルダが読めるときの同一内容は、検証できた JSON だけで判定すること
+- 一致検索は、保存済み本文の部分文字列を含む発言をすべて返すこと。本文は変わらないこと
+- ヒットが指す記録と発言を、その JSON から原文のまま開けること
+- 索引とベクトルを `Conversation` の JSON に書かないこと
+- Ollama が応答しないとき、似た言葉を成功にしないこと
 
 実装後の手動確認:
 

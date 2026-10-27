@@ -174,3 +174,86 @@ pre.message {
   font-family: inherit;
   margin: 0;
 }
+
+.seek {
+  display: block;
+  max-width: 36rem;
+  margin: 0 0 2.5rem;
+}
+
+.seek span {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: #78716c;
+}
+
+.seek input {
+  width: 100%;
+  padding: 0.35rem 0;
+  border: 0;
+  border-bottom: 1px solid #e7e5e4;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.hits {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hit {
+  display: block;
+  width: 100%;
+  padding: 1.25rem 1.25rem 1rem;
+  border: 0;
+  background: #fffdf8;
+  text-align: left;
+}
+
+.hit-title {
+  display: block;
+  font-size: 1.25rem;
+}
+
+.hit-meta {
+  display: block;
+  margin: 0.75rem 0;
+  color: #78716c;
+  font-size: 0.9rem;
+}
+
+.hit-line {
+  display: block;
+  white-space: pre-wrap;
+}
+
+mark {
+  background: #f3ead7;
+  color: inherit;
+}
+
+.reading-focus {
+  scroll-margin-top: 1.5rem;
+}
+
+.reading-from-search {
+  padding-bottom: 4.5rem;
+}
+
+.back-float {
+  position: fixed;
+  right: 2.5rem;
+  bottom: 1.5rem;
+  z-index: 2;
+  padding: 0.7rem 1rem;
+  border: 0;
+  background: #fffdf8;
+  box-shadow: 6px 6px 0 #e7e5e4;
+  color: inherit;
+  font: inherit;
+}

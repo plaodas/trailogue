@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer as createViteServer } from "vite";
 import type { Conversation } from "../src/domain/types";
+import { findTextMatches } from "../src/search/text";
 import {
   CONVERSATION_FILE_NAME,
   OPENED_MARKS_NAME,
@@ -62,6 +63,13 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         opened,
         records: loaded.records,
+      });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/search") {
+      const query = url.searchParams.get("q") ?? "";
+      sendJson(response, 200, {
+        matches: findTextMatches([...loaded.conversations.values()], query),
       });
       return;
     }
