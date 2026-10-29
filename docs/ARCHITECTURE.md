@@ -315,6 +315,8 @@ ChatGPT共有会話は `script#__WEB_MOBILE_DATA__` の `conversation.messages` 
 
 ChatGPT通常会話で確認できたページには、本文の埋め込みが無く、仮想化も無かった。`data-chatgpt-search-message-ids` を文書順に読む。役割は `data-conversation-role="assistant"`、`data-chatgpt-search-unit-key` の末尾、または見出し「あなたの発言:」で決める。ユーザー本文は `data-search-result-target`、assistant本文は `data-markdown-text-style="assistant-message"` の表示テキストである。段落、リスト、コードブロックの表示テキストを含め、その要素の中にある `data-search-result-target` へ本文を切り替えない。本文のある最初のユーザー発言より後に空の assistant 本文があるときは、描画前の殻として `not_ready` とし、空の成功にしない。発言がまだ無く、URLの会話識別子と同じ `data-conversation-id` を持つ textarea と、空の `[data-thread-user-message-navigation-content]` があるときも `not_ready` とする。サイドバーの履歴や起動時のbootstrapは本文に使わない。クラス名に `data-virtualized-turn-content` と書かれているだけでは仮想化とみなさない。属性としてその要素があるページは `incomplete_conversation` とし、スクロールでは集めない。本文のある最初のユーザー発言より前は残さない。空白だけのユーザー本文も手前に含める。残った発言の順序は振り直す。本文のあるユーザーが1件も無いときは `empty_conversation` とする。そのユーザーより後の空本文は残す。この読み方の版は `chatgpt-4` である。タイトルは、サイト名 `ChatGPT` 以外の document title を使う。ChatGPTのサイドバーは順次取り込みの対象にしない。見えている範囲だけでも成功になり、短い記録が別の記録として残るためである。
 
+ChatGPTの Export は、利用者が選んだ `conversations.json`、または zip 内の同名エントリだけを読む。`chat.html`、`user.json`、設定は読まない。zip は store または deflate の `conversations.json` だけを展開する。この読み方の版は `chatgpt-export-1` である。`sourceId` は `conversation_id`、`sourceUrl` は `https://chatgpt.com/c/{conversation_id}`、`sourceKind` は `conversation` である。順は `current_node` から親を根までたどって逆にした列であり、`create_time` では並べ替えない。メッセージの無いノードは捨てる。`content_type` が `text` で `parts` がすべて文字列のノードだけを残し、複数の part は出現順に改行でつなぐ。`thoughts` と `reasoning_recap`、現在の経路から外れたノードは列に入れない。役割は `user` と `assistant` 以外を `unknown` にする。本文のある最初のユーザー発言より前は残さない。本文のあるユーザーが1件も無いときは `empty_conversation`、`current_node` を辿れないときと文字列でない part があるときは `incomplete_conversation` とし、その1件だけを保存しない。配列でない文書は `unrecognized_structure` である。保存の `capturedAt` は取り込んだ時刻である。同じ `contentHash` は書かず、同じ `sourceId` の別ハッシュと拡張の記録は残す。選んだ直後には書かず、確認のあと既存の `storeCapturedConversation` で書く。
+
 サインイン画面のDOMは未確認なので、`login_required` を返すセレクタは置いていない。既知の構造が無い読み込み済みDocumentは `unrecognized_structure` である。
 
 fixtureへはこの契約を再現する最小データだけを置く。conversation transfer token、reconnect token、他のチャット履歴、プロフィール画像を含む保存HTML全体は入れない。
@@ -331,7 +333,7 @@ fixtureへはこの契約を再現する最小データだけを置く。convers
 
 一致検索は机にある。クエリが空のあいだ、玄関は今のままである。ヒットを選ぶと、その発言がある経路を開く。拡張のダッシュボードは採取と一覧のままである。
 
-一覧の各行は、タイトル、provider、取得日時、発言数を示す。同じ `sourceId` の記録が複数あれば、取得日時で区別する。各行と、開いている記録から、その1件を削除できる。削除の前にタイトルと provider を確認する。フォルダが読めないときは削除できない。フォルダが未選択のとき、および権限が切れているときは、一覧の上部にその状態とフォルダを開く操作を出す。プレビューには出さない。
+一覧は `sourceId` ごとに束ねる。束は最新の取得日時の新しい順、束の中は取得日時の古い順である。各行は、タイトル、provider、取得日時、発言数、`parserVersion` を示す。束に2件以上あるとき、各行は同じ束の他の世代に対する、増えた、表示が短い、途中の窓、内容が変わったを示す。各行と、開いている記録から、その1件を削除できる。削除の前にタイトルと provider を確認する。フォルダが読めないときは削除できない。フォルダが未選択のとき、および権限が切れているときは、一覧の上部にその状態とフォルダを開く操作を出す。プレビューには出さない。
 
 会話ページを開いたとき、および同じ文書内の遷移で、そのタブのツールバーに取り込み状態を出す。保存はしない。フォルダの権限が `granted` で、キャッシュをそのフォルダから揃えたときだけ、済、未、差を出す。差のツールチップは、増えた、表示が短い、途中の窓、内容が変わったを分ける。描画待ちは確認中、全件を確認できないページは照合できない、フォルダを読めないときは未確認とする。未確認のときは、キャッシュに同じ `sourceId` があっても未取り込みとは出さない。会話ページでなくなったタブのバッジは消す。Braveのバッジは変えない。サービスワーカーの生存中、フォルダ一覧からの揃えは一度だけ行う。失敗したときは、次の照合で揃え直す。
 
@@ -364,6 +366,9 @@ fixtureへはこの契約を再現する最小データだけを置く。convers
 - ヒットが指す記録と発言を、その JSON から原文のまま開けること
 - 索引とベクトルを `Conversation` の JSON に書かないこと
 - Ollama が応答しないとき、似た言葉を成功にしないこと
+- ChatGPTの Export は、現在経路の text だけを残し、思考ノードと経路外の分岐を列に入れないこと。壊れた1件が隣の会話を落とさないこと
+- 同じハッシュの Export は書かず、同じ `sourceId` の別本文は別記録として残ること
+- 一覧の束は、最新の取得日時の新しい順、束の中は取得日時の古い順であり、関係ラベルを付けること
 
 実装後の手動確認:
 
@@ -375,5 +380,6 @@ fixtureへはこの契約を再現する最小データだけを置く。convers
 6. Copilotの共有会話、ChatGPTの通常会話と共有会話で2から5を行う
 7. providerのホーム、設定、一覧で実行し、保存されないことを確認する
 8. 対応外ホストで実行し、ページを取得しないことを確認する
+9. ChatGPTの `conversations.json` を選び、確認のあと保存する。同じ `conversation_id` の拡張の記録は残り、一覧では同じ束に取得日時、発言数、`parserVersion` が見えることを確認する
 
 providerの埋め込み形式とDOMは予告なく変わる。手動確認で構造不明になった場合は、機密値を除いたfixtureを更新してadapterを直す。ページ全体のテキスト抽出や、仮想DOMに偶然存在する一部分へフォールバックして成功にしない。

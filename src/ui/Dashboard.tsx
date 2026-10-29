@@ -12,12 +12,15 @@ import type { SidebarConversation } from "../capture/sidebar";
 import type { DashboardPhase, DashboardStatus } from "../capture/status";
 import { transition, type SessionEvent, type SessionState } from "../capture/session";
 import { normalize } from "../domain/normalize";
+import { groupRecords, relateGroups, type SourceGroup } from "../domain/sourceGroups";
 import { deriveThoughtPath } from "../domain/thoughtPath";
 import type { CaptureFailureCode, Conversation, MessageRole, ProviderId } from "../domain/types";
+import { readExportFile } from "../providers/chatgpt/exportFile";
+import { buildExportPreview, type ExportPreviewItem } from "../providers/chatgpt/exportPreview";
 import { alignCache } from "../storage/alignCache";
 import type { ConversationRepository } from "../storage/repository";
 import type { CapturePort, CaptureRead } from "./capturePort";
-import { copy, failureCopy } from "./copy";
+import { copy, exportFailureCopy, failureCopy, generationCopy } from "./copy";
 import { downloadMarkdown } from "./downloadMarkdown";
 import type { SidebarBatchPort } from "./extensionBatch";
 import { storeCapturedConversation } from "./storeCapture";
@@ -48,6 +51,9 @@ export function Dashboard({ repository, archive, capture, sidebar }: Props) {
   const [batch, setBatch] = useState<BatchState>(idleBatch());
   const [batchMessage, setBatchMessage] = useState<string | null>(null);
   const [batchFailures, setBatchFailures] = useState<readonly SidebarConversation[]>([]);
+  const [exportPreview, setExportPreview] = useState<ExportPreviewItem[] | null>(null);
+  const [exportNote, setExportNote] = useState<string | null>(null);
+  const [exportBusy, setExportBusy] = useState(false);
 
   const sessionRef = useRef<SessionState>("idle");
   const tabIdRef = useRef<number | null>(null);
@@ -367,6 +373,56 @@ export function Dashboard({ repository, archive, capture, sidebar }: Props) {
     await refresh();
   }
 
+  async function chooseExport(file: File) {
+    setExportNote(null);
+    const data = await readExportFile(new Uint8Array(await file.arrayBuffer()));
+    if (data === null) {
+      setExportPreview(null);
+      setExportNote(copy.exportFileUnread);
+      return;
+    }
+    const preview = await buildExportPreview(data, records);
+    if (!preview.ok) {
+      setExportPreview(null);
+      setExportNote(copy.exportFileUnread);
+      return;
+    }
+    setExportPreview(preview.items);
+  }
+
+  async function confirmExport() {
+    const items = exportPreview;
+    if (!items || exportBusy) return;
+    setExportBusy(true);
+    try {
+      if ((await archiveRef.current.connection()) !== "ready") {
+        const opened = await archiveRef.current.openFolder();
+        if (opened !== "ready") return;
+      }
+      let stored = 0;
+      let skipped = 0;
+      let failed = 0;
+      for (const item of items) {
+        if (!item.capture) continue;
+        const result = await storeCapturedConversation(
+          item.capture,
+          archiveRef.current,
+          repositoryRef.current,
+        );
+        if (result === "stored") stored += 1;
+        else if (result === "skipped") skipped += 1;
+        else failed += 1;
+      }
+      setExportPreview(null);
+      setExportNote(`${copy.exportStored(stored)} ${copy.exportSkipped(skipped)} ${copy.exportFailed(failed)}`);
+      await refresh();
+    } catch {
+      setExportNote(copy.saveFailed);
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
   async function openExisting() {
     if (!existing || sessionRef.current !== "duplicate") return;
     const stored = await repositoryRef.current.mirror(existing);
@@ -564,6 +620,12 @@ export function Dashboard({ repository, archive, capture, sidebar }: Props) {
           message={batchMessage}
           failures={batchFailures}
           onImport={sidebar ? () => void startSidebarBatch(false) : undefined}
+          exportPreview={exportPreview}
+          exportNote={exportNote}
+          exportBusy={exportBusy}
+          onChooseExport={(file) => void chooseExport(file)}
+          onConfirmExport={() => void confirmExport()}
+          onCancelExport={() => setExportPreview(null)}
         />
       )}
     </main>
@@ -840,6 +902,12 @@ function RecordList({
   message,
   failures,
   onImport,
+  exportPreview,
+  exportNote,
+  exportBusy,
+  onChooseExport,
+  onConfirmExport,
+  onCancelExport,
 }: {
   records: Conversation[];
   connection: ArchiveConnection | null;
@@ -850,7 +918,27 @@ function RecordList({
   message: string | null;
   failures: readonly SidebarConversation[];
   onImport?: () => void;
+  exportPreview: ExportPreviewItem[] | null;
+  exportNote: string | null;
+  exportBusy: boolean;
+  onChooseExport: (file: File) => void;
+  onConfirmExport: () => void;
+  onCancelExport: () => void;
 }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [groups, setGroups] = useState<SourceGroup[]>(() => groupRecords(records));
+  useEffect(() => {
+    const grouped = groupRecords(records);
+    setGroups(grouped);
+    let cancelled = false;
+    void relateGroups(grouped).then((related) => {
+      if (!cancelled) setGroups(related);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [records]);
+  const canSaveExport = exportPreview?.some((item) => item.capture && !item.sameHash) ?? false;
   return (
     <section>
       <ArchiveBanner connection={connection} onOpenFolder={onOpenFolder} />
@@ -860,24 +948,71 @@ function RecordList({
       {onImport ? (
         <button type="button" onClick={onImport}>{copy.batchStart}</button>
       ) : null}
+      <button type="button" onClick={() => fileRef.current?.click()}>{copy.exportPick}</button>
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".json,.zip,application/json,application/zip"
+        hidden
+        aria-label={copy.exportPick}
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (file) onChooseExport(file);
+        }}
+      />
+      {exportNote ? <p>{exportNote}</p> : null}
+      {exportPreview ? (
+        <section>
+          <h3>Exportの確認</h3>
+          {exportPreview.length === 0 ? <p>{copy.exportNone}</p> : null}
+          <ul>
+            {exportPreview.map((item) => (
+              <li key={item.index}>
+                <span>{item.title}</span>
+                <span>{item.messageCount}件</span>
+                {item.hasGeneration ? <span>{copy.exportExisting}</span> : null}
+                {item.sameHash ? <span>{copy.duplicate}</span> : null}
+                {item.failure ? <span>{exportFailureCopy(item.failure)}</span> : null}
+              </li>
+            ))}
+          </ul>
+          <div className="actions">
+            <button type="button" onClick={onConfirmExport} disabled={exportBusy || !canSaveExport}>
+              {copy.exportConfirm}
+            </button>
+            <button type="button" onClick={onCancelExport} disabled={exportBusy}>
+              {copy.exportCancel}
+            </button>
+          </div>
+        </section>
+      ) : null}
       {unreadable > 0 ? <p className="warning">{copy.unreadable(unreadable)}</p> : null}
       {records.length === 0 ? <p>保存した会話はまだありません。</p> : null}
-      <ul>
-        {records.map((record) => (
-          <li key={record.id} className="record-row">
-            <button type="button" className="record" onClick={() => onOpen(record.id)}>
-              <span>{record.title}</span>
-              <span>{record.provider}</span>
-              <time dateTime={record.capturedAt}>{record.capturedAt}</time>
-              <span>{record.messages.length}件</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => onDelete(record)}
-              disabled={connection !== "ready"}
-            >
-              {copy.deleteRecord}
-            </button>
+      <ul className="source-groups">
+        {groups.map((group) => (
+          <li key={group.sourceId}>
+            <ul className="source-group">
+              {group.records.map((row) => (
+                <li key={row.conversation.id} className="record-row">
+                  <button type="button" className="record" onClick={() => onOpen(row.conversation.id)}>
+                    <span>{row.conversation.title}</span>
+                    <span>{row.conversation.provider}</span>
+                    <time dateTime={row.conversation.capturedAt}>{row.conversation.capturedAt}</time>
+                    <span>{row.conversation.messages.length}件</span>
+                    <span>{row.conversation.parserVersion}</span>
+                    {row.relation ? <span>{generationCopy(row.relation)}</span> : null}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDelete(row.conversation)}
+                    disabled={connection !== "ready"}
+                  >
+                    {copy.deleteRecord}
+                  </button>
+                </li>
+              ))}
+            </ul>
           </li>
         ))}
       </ul>

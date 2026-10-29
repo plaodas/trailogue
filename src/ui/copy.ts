@@ -40,7 +40,38 @@ export const copy = {
   batchSkipped: (count: number) => `同じ内容 ${count}`,
   batchFailed: (count: number) => `失敗 ${count}`,
   batchFailedHeading: "取り込めなかった会話",
+  exportPick: "ChatGPTのExportを取り込む",
+  exportConfirm: "このExportを保存する",
+  exportCancel: "取り込むのをやめる",
+  exportExisting: "同じ会話の記録が既にあります",
+  exportFileUnread: "このファイルから conversations.json を読めませんでした",
+  exportNone: "読めた会話がありません。",
+  exportIncomplete: "この会話の全発言を確認できないので保存しません。",
+  exportEmpty: "本文のある発言が無いので保存しません。",
+  exportUnrecognized: "この会話の構造を読めないので保存しません。",
+  exportStored: (count: number) => `保存 ${count}`,
+  exportSkipped: (count: number) => `同じ内容 ${count}`,
+  exportFailed: (count: number) => `失敗 ${count}`,
+  generationExtended: "増えた",
+  generationShortened: "表示が短い",
+  generationWindow: "途中の窓",
+  generationDiverged: "内容が変わった",
 } as const;
+
+export function generationCopy(reason: "extended" | "shortened" | "window" | "diverged"): string {
+  if (reason === "extended") return copy.generationExtended;
+  if (reason === "shortened") return copy.generationShortened;
+  if (reason === "window") return copy.generationWindow;
+  return copy.generationDiverged;
+}
+
+export function exportFailureCopy(
+  code: "incomplete_conversation" | "empty_conversation" | "unrecognized_structure",
+): string {
+  if (code === "incomplete_conversation") return copy.exportIncomplete;
+  if (code === "empty_conversation") return copy.exportEmpty;
+  return copy.exportUnrecognized;
+}
 
 export function failureCopy(code: CaptureFailureCode | null): string {
   if (code === "empty_conversation") return copy.empty;

@@ -37,6 +37,7 @@ describe("desk album", () => {
     expect(covers[0]?.title).toBe("あと");
     expect(covers[0]?.day).toBe("2026-10-25");
     expect(covers[0]?.rings.map((ring) => ring.title)).toEqual(["初め", "あと"]);
+    expect(covers[0]?.rings.map((ring) => ring.parserVersion)).toEqual(["copilot-1", "copilot-1"]);
   });
 
   it("orders one day by capture time and finds the latest day", () => {
@@ -111,6 +112,7 @@ function record(input: {
     capturedAt: input.capturedAt,
     contentHash: input.hash ?? `${input.id.padEnd(64, "0")}`,
     messageCount: 1,
+    parserVersion: "copilot-1",
   };
 }
 

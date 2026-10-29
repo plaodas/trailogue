@@ -421,7 +421,7 @@ function FlipView({
                       aria-current={ringIndex === flip.ring ? "true" : undefined}
                       onClick={() => onChange({ kind: "flip", flip: { ...flip, ring: ringIndex } })}
                     >
-                      年輪
+                      {`年輪 ${item.messageCount}件 ${item.parserVersion}`}
                     </button>
                   ))}
                 </div>
