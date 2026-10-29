@@ -27,6 +27,7 @@ export async function readDeskFiles(
       capturedAt: conversation.capturedAt,
       contentHash: conversation.contentHash,
       messageCount: conversation.messages.length,
+      parserVersion: conversation.parserVersion,
     });
   }
   return { records, conversations, unreadable };

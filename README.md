@@ -60,6 +60,7 @@ adapterが依存している形式は次です。fixtureは実ページの保存
 - Copilot通常会話と共有会話: inline script の `window.__staticRouterHydrationData`。通常会話は `loaderData["chat-history"].store.rawConversationResponse`、共有会話は `loaderData["chat-share-redeem"].store.rawConversationResponse`。`author` は `user` と `bot`、本文は `text`、順は配列順。
 - ChatGPT共有会話: `script#__WEB_MOBILE_DATA__` の `conversation.messages`。`role` は `user` と `assistant`、本文は `content`。
 - ChatGPT通常会話: `data-chatgpt-search-message-ids`、見出し「あなたの発言:」、`data-conversation-role="assistant"`。ユーザー本文は `data-search-result-target`、assistant本文は `data-markdown-text-style="assistant-message"`。assistant本文が空のとき、または発言がまだ無く同じ会話の入力欄と空の本文枠だけがあるときは描画待ちにし、空の発言として保存しない。
+- ChatGPTの Export: `conversations.json`。`sourceId` は `conversation_id`。順は `current_node` から親をたどった現在の経路で、`content_type` が `text` の `parts` だけを残す。この読み方の版は `chatgpt-export-1` である。zip からは同名エントリだけを読む。
 
 Copilotの content script は `document_start` で hydration script のテキストを保持する。保持するのは、今開いている文書の最初のHTMLである。そのタブの中で足した発言は、ページを自分で読み直すまで取得に入らない。ページを開いたときの照合もこの保持を読む。保存は、拡張機能のボタンを押したときだけ行う。
 

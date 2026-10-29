@@ -25,6 +25,17 @@ button,
   align-items: baseline;
 }
 
+.source-groups,
+.source-group {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.source-groups > li + li {
+  margin-top: 0.75rem;
+}
+
 .record-row {
   display: flex;
   align-items: center;

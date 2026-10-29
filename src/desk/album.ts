@@ -8,6 +8,7 @@ export type DeskRecord = {
   capturedAt: string;
   contentHash: string;
   messageCount: number;
+  parserVersion: string;
 };
 
 export type Ring = {
@@ -16,6 +17,7 @@ export type Ring = {
   capturedAt: string;
   title: string;
   messageCount: number;
+  parserVersion: string;
 };
 
 export type Cover = {
@@ -69,6 +71,7 @@ export function groupCovers(records: readonly DeskRecord[], timeZone: string): C
         capturedAt: record.capturedAt,
         title: record.title,
         messageCount: record.messageCount,
+        parserVersion: record.parserVersion,
       })),
     });
   }

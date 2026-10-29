@@ -534,6 +534,71 @@ describe("Dashboard", () => {
     expect(await repository.findByHash(existing.contentHash)).toBeTruthy();
     expect(screen.getByRole("button", { name: "記録フォルダを選ぶ" })).toBeTruthy();
   });
+
+  it("saves a confirmed export beside the existing generation of the same conversation", async () => {
+    const repository = createTestRepository();
+    const memory = createMemoryArchive();
+    const existing = await normalize(
+      {
+        ...sampleCapture(),
+        provider: "chatgpt",
+        sourceUrl: "https://chatgpt.com/c/conv-keep",
+        sourceId: "conv-keep",
+        title: "ページ",
+        parserVersion: "chatgpt-4",
+        messages: [{ ordinal: 0, role: "user", content: "ページの本文", providerMessageId: "page" }],
+      },
+      { id: "page", capturedAt: "2026-01-01T00:00:00.000Z" },
+    );
+    await memory.archive.write(existing);
+    const port = createPort(async () => ({ ok: true, capture: sampleCapture() }));
+    renderDashboard(repository, port.port, memory.archive);
+    expect(await screen.findByRole("button", { name: /ページ/ })).toBeTruthy();
+
+    const input = document.querySelector("input[type=file]");
+    if (!(input instanceof HTMLInputElement)) throw new Error("missing file input");
+    const file = new File([JSON.stringify([
+      {
+        conversation_id: "conv-keep",
+        title: "ファイル",
+        current_node: "u",
+        mapping: {
+          r: { parent: null, message: null },
+          u: {
+            parent: "r",
+            message: {
+              id: "u",
+              author: { role: "user" },
+              content: { content_type: "text", parts: ["ファイルの本文"] },
+            },
+          },
+        },
+      },
+      {
+        conversation_id: "conv-broken",
+        title: "壊れた",
+        current_node: "gone",
+        mapping: { r: { parent: null, message: null } },
+      },
+    ])], "conversations.json", { type: "application/json" });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    expect(await screen.findByText("同じ会話の記録が既にあります")).toBeTruthy();
+    expect(screen.getByText("この会話の全発言を確認できないので保存しません。")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "このExportを保存する" }));
+
+    expect(await screen.findByText("保存 1 同じ内容 0 失敗 0")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /ページ/ })).toBeTruthy();
+    const imported = await screen.findByRole("button", { name: /ファイル/ });
+    expect(imported.textContent).toContain("chatgpt-export-1");
+    expect(await screen.findAllByText("内容が変わった")).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: /壊れた/ })).toBeNull();
+    const listing = await memory.archive.list();
+    expect(listing.conversations.map((item) => item.parserVersion).sort()).toEqual([
+      "chatgpt-4",
+      "chatgpt-export-1",
+    ]);
+  });
 });
 
 function renderDashboard(
