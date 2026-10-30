@@ -15,6 +15,7 @@ import {
   type OpenedMarks,
 } from "../src/desk/album";
 import { markQuery, matchingLines, type TextMatch } from "../src/search/text";
+import type { SemanticMatch } from "../src/search/rank";
 
 type Album = {
   unreadable: number;
@@ -31,13 +32,32 @@ type Flip = {
 
 type ReadingOrigin =
   | { kind: "flip"; flip: Flip }
-  | { kind: "search"; query: string };
+  | { kind: "search"; search: SearchScreen; highlightQuery: string | null };
+
+type ExactSearchState =
+  | { kind: "loading" }
+  | { kind: "success"; matches: TextMatch[] }
+  | { kind: "failed" };
+
+type SemanticSearchState =
+  | { kind: "idle" }
+  | { kind: "indexing" }
+  | { kind: "searching" }
+  | { kind: "success"; matches: SemanticMatch[] }
+  | { kind: "failed"; message: string };
+
+type SearchScreen = {
+  kind: "search";
+  query: string;
+  exact: ExactSearchState;
+  semantic: SemanticSearchState;
+};
 
 type Screen =
   | { kind: "home" }
   | { kind: "month"; month: string }
   | { kind: "flip"; flip: Flip }
-  | { kind: "search"; query: string }
+  | SearchScreen
   | {
       kind: "reading";
       origin: ReadingOrigin;
@@ -89,7 +109,7 @@ export function Desk() {
       setScreen({ kind: "home" });
       return;
     }
-    setScreen({ kind: "search", query: next });
+    setScreen({ kind: "search", query: next, exact: { kind: "loading" }, semantic: { kind: "idle" } });
   }
 
   function startFlip(next: Cover[]) {
@@ -128,15 +148,23 @@ export function Desk() {
     setScreen({ kind: "reading", origin: { kind: "flip", flip }, conversation, focusMessageId: null });
   }
 
-  async function openMatch(match: TextMatch, searchQuery: string) {
+  async function openMatch(
+    match: TextMatch | SemanticMatch,
+    search: SearchScreen,
+    highlightQuery: string | null,
+  ) {
     const conversation = await openSaved(match.conversationId, match.contentHash);
     if (!conversation) return;
     setScreen({
       kind: "reading",
-      origin: { kind: "search", query: searchQuery },
+      origin: { kind: "search", search, highlightQuery },
       conversation,
       focusMessageId: match.messageId,
     });
+  }
+
+  function updateSearch(searchQuery: string, update: (search: SearchScreen) => SearchScreen) {
+    setScreen((current) => (current.kind === "search" && current.query === searchQuery ? update(current) : current));
   }
 
   const selectedMonth = screen.kind === "month" ? screen.month : null;
@@ -165,12 +193,13 @@ export function Desk() {
           <Reading
             conversation={screen.conversation}
             focusMessageId={screen.focusMessageId}
-            query={screen.origin.kind === "search" ? screen.origin.query : null}
+            fromSearch={screen.origin.kind === "search"}
+            highlightQuery={screen.origin.kind === "search" ? screen.origin.highlightQuery : null}
             backLabel={screen.origin.kind === "search" ? "結果へ戻る" : "表紙へ戻る"}
             onBack={() => {
               if (screen.origin.kind === "search") {
-                setQuery(screen.origin.query);
-                setScreen({ kind: "search", query: screen.origin.query });
+                setQuery(screen.origin.search.query);
+                setScreen(screen.origin.search);
                 return;
               }
               setScreen({ kind: "flip", flip: screen.origin.flip });
@@ -187,9 +216,11 @@ export function Desk() {
           />
         ) : screen.kind === "search" ? (
           <SearchResults
-            query={screen.query}
+            search={screen}
             timeZone={album.timeZone}
-            onOpen={(match) => void openMatch(match, screen.query)}
+            onChange={(update) => updateSearch(screen.query, update)}
+            onOpenExact={(match) => void openMatch(match, screen, screen.query)}
+            onOpenSemantic={(match) => void openMatch(match, screen, null)}
           />
         ) : (
           <Entrance
@@ -224,41 +255,116 @@ function Seek({ query, onQuery }: { query: string; onQuery: (query: string) => v
 }
 
 function SearchResults({
+  search,
+  timeZone,
+  onChange,
+  onOpenExact,
+  onOpenSemantic,
+}: {
+  search: SearchScreen;
+  timeZone: string;
+  onChange: (update: (search: SearchScreen) => SearchScreen) => void;
+  onOpenExact: (match: TextMatch) => void;
+  onOpenSemantic: (match: SemanticMatch) => void;
+}) {
+  const semanticRequest = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (search.exact.kind !== "loading") return;
+    const controller = new AbortController();
+    void fetch(`/api/search?q=${encodeURIComponent(search.query)}`, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("search failed");
+        const body = (await response.json()) as { matches: TextMatch[] };
+        onChange((current) => ({ ...current, exact: { kind: "success", matches: body.matches } }));
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        onChange((current) => ({ ...current, exact: { kind: "failed" } }));
+      });
+    return () => controller.abort();
+  }, [onChange, search.exact.kind, search.query]);
+
+  useEffect(() => {
+    return () => semanticRequest.current?.abort();
+  }, [search.query]);
+
+  async function findSemantic(): Promise<void> {
+    semanticRequest.current?.abort();
+    const controller = new AbortController();
+    semanticRequest.current = controller;
+    onChange((current) => ({ ...current, semantic: { kind: "indexing" } }));
+    try {
+      const indexed = await fetch("/api/search/semantic/index", { method: "POST", signal: controller.signal });
+      if (!indexed.ok) throw new Error(await responseError(indexed));
+      onChange((current) => ({ ...current, semantic: { kind: "searching" } }));
+      const response = await fetch("/api/search/semantic", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ query: search.query }),
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(await responseError(response));
+      const body = (await response.json()) as { matches: SemanticMatch[] };
+      onChange((current) => ({ ...current, semantic: { kind: "success", matches: body.matches } }));
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      const message = error instanceof Error && error.message ? error.message : "似た言葉を探せませんでした";
+      onChange((current) => ({ ...current, semantic: { kind: "failed", message } }));
+    } finally {
+      if (semanticRequest.current === controller) semanticRequest.current = null;
+    }
+  }
+
+  return (
+    <section className="search-results">
+      <h1>一致する本文</h1>
+      <ExactResults state={search.exact} query={search.query} timeZone={timeZone} onOpen={onOpenExact} />
+      <section className="semantic-results">
+        <h2>似た言葉</h2>
+        {search.semantic.kind === "idle" ? (
+          <button type="button" className="semantic-action" onClick={() => void findSemantic()}>
+            似た言葉でも探す
+          </button>
+        ) : search.semantic.kind === "indexing" ? (
+          <p className="quiet">保存した発言を索引にしています</p>
+        ) : search.semantic.kind === "searching" ? (
+          <p className="quiet">似た言葉を探しています</p>
+        ) : search.semantic.kind === "failed" ? (
+          <div>
+            <p className="warning">{search.semantic.message}</p>
+            <button type="button" className="semantic-action" onClick={() => void findSemantic()}>
+              もう一度探す
+            </button>
+          </div>
+        ) : search.semantic.matches.length === 0 ? (
+          <p className="quiet">近い発言はありません</p>
+        ) : (
+          <SemanticResults matches={search.semantic.matches} timeZone={timeZone} onOpen={onOpenSemantic} />
+        )}
+      </section>
+    </section>
+  );
+}
+
+function ExactResults({
+  state,
   query,
   timeZone,
   onOpen,
 }: {
+  state: ExactSearchState;
   query: string;
   timeZone: string;
   onOpen: (match: TextMatch) => void;
 }) {
-  const [matches, setMatches] = useState<TextMatch[] | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    setFailed(false);
-    setMatches(null);
-    void fetch(`/api/search?q=${encodeURIComponent(query)}`, { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("search failed");
-        const body = (await response.json()) as { matches: TextMatch[] };
-        setMatches(body.matches);
-      })
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        setFailed(true);
-      });
-    return () => controller.abort();
-  }, [query]);
-
-  if (failed) return <p className="warning">本文を探せませんでした</p>;
-  if (!matches) return <p className="quiet">本文を探しています</p>;
-  if (matches.length === 0) return <p className="quiet">この文字列を含む発言はありません</p>;
+  if (state.kind === "loading") return <p className="quiet">本文を探しています</p>;
+  if (state.kind === "failed") return <p className="warning">本文を探せませんでした</p>;
+  if (state.matches.length === 0) return <p className="quiet">この文字列を含む発言はありません</p>;
   return (
     <ul className="hits">
-      {matches.map((match) => (
-        <li key={`${match.conversationId}:${match.messageId}`}>
+      {state.matches.map((match) => (
+        <li key={`${match.contentHash}:${match.messageId}`}>
           <button type="button" className="hit" onClick={() => onOpen(match)}>
             <span className="hit-title">{match.title}</span>
             <span className="hit-meta">
@@ -274,6 +380,42 @@ function SearchResults({
       ))}
     </ul>
   );
+}
+
+function SemanticResults({
+  matches,
+  timeZone,
+  onOpen,
+}: {
+  matches: SemanticMatch[];
+  timeZone: string;
+  onOpen: (match: SemanticMatch) => void;
+}) {
+  return (
+    <ul className="hits">
+      {matches.map((match) => (
+        <li key={`${match.contentHash}:${match.messageId}`}>
+          <button type="button" className="hit" onClick={() => onOpen(match)}>
+            <span className="hit-title">{match.title}</span>
+            <span className="hit-meta">
+              {roleLabel(match.provider, match.role)} {localDay(match.capturedAt, timeZone)}
+            </span>
+            <span className="hit-line">{match.content}</span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+async function responseError(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as { error?: unknown };
+    if (typeof body.error === "string" && body.error !== "") return body.error;
+  } catch {
+    // The server may have failed before it could produce its JSON error shape.
+  }
+  return "似た言葉を探せませんでした";
 }
 
 function MarkedText({ text, query }: { text: string; query: string }) {
@@ -442,14 +584,16 @@ function FlipView({
 function Reading({
   conversation,
   focusMessageId,
-  query,
+  fromSearch,
+  highlightQuery,
   backLabel,
   onBack,
   onHome,
 }: {
   conversation: Conversation;
   focusMessageId: string | null;
-  query: string | null;
+  fromSearch: boolean;
+  highlightQuery: string | null;
   backLabel: string;
   onBack: () => void;
   onHome: () => void;
@@ -460,7 +604,6 @@ function Reading({
     focusRef.current?.scrollIntoView({ block: "start" });
   }, [conversation.id, focusMessageId]);
 
-  const fromSearch = query !== null;
   return (
     <section className={fromSearch ? "reading-from-search" : undefined}>
       <div className="actions">
@@ -481,7 +624,11 @@ function Reading({
           >
             <p className="message-role">{roleLabel(conversation.provider, message.role)}</p>
             <pre className="message">
-              {focused && query ? <MarkedText text={message.content} query={query} /> : message.content}
+              {focused && highlightQuery ? (
+                <MarkedText text={message.content} query={highlightQuery} />
+              ) : (
+                message.content
+              )}
             </pre>
           </article>
         );

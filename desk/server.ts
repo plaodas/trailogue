@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createServer as createViteServer } from "vite";
 import type { Conversation } from "../src/domain/types";
 import { findTextMatches } from "../src/search/text";
+import { SemanticSearchError, SemanticSearchService } from "./semanticSearch";
 import {
   CONVERSATION_FILE_NAME,
   OPENED_MARKS_NAME,
@@ -19,9 +20,9 @@ const PORT = 4737;
 const deskRoot = fileURLToPath(new URL(".", import.meta.url));
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
-const folder = process.argv[2];
+const { folder, model } = parseArguments(process.argv.slice(2));
 if (!folder) {
-  console.error("保存フォルダを指定する。例: npm run desk -- /mnt/f/trailogue");
+  console.error("保存フォルダを指定する。例: npm run desk -- /mnt/f/trailogue --model embeddinggemma");
   process.exit(1);
 }
 
@@ -34,6 +35,7 @@ if (!rootStat?.isDirectory()) {
 
 const loaded = await loadFolder(root);
 let opened = await loadOpenedMarks(root);
+const semanticSearch = new SemanticSearchService(root, [...loaded.conversations.values()], model);
 
 const vite = await createViteServer({
   configFile: join(deskRoot, "vite.config.ts"),
@@ -71,6 +73,25 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
       sendJson(response, 200, {
         matches: findTextMatches([...loaded.conversations.values()], query),
       });
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/search/semantic/index") {
+      try {
+        await semanticSearch.ensureIndex();
+        sendJson(response, 200, { ok: true });
+      } catch (error) {
+        sendSemanticError(response, error);
+      }
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/search/semantic") {
+      const body = await readBody(request);
+      const query = typeof body.query === "string" ? body.query : "";
+      try {
+        sendJson(response, 200, { matches: await semanticSearch.search(query) });
+      } catch (error) {
+        sendSemanticError(response, error);
+      }
       return;
     }
     if (request.method === "GET" && url.pathname.startsWith("/api/conversations/")) {
@@ -173,4 +194,40 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
     "content-length": Buffer.byteLength(payload),
   });
   response.end(payload);
+}
+
+function sendSemanticError(response: ServerResponse, error: unknown): void {
+  if (!(error instanceof SemanticSearchError)) {
+    console.error(error);
+    sendJson(response, 500, { code: "index_unavailable", error: "類義語の索引を利用できません" });
+    return;
+  }
+  const status =
+    error.code === "invalid_query"
+      ? 400
+      : error.code === "model_required"
+        ? 409
+        : error.code === "input_too_long"
+          ? 422
+          : error.code === "unavailable" || error.code === "model_not_found"
+            ? 503
+            : error.code === "invalid_response"
+              ? 502
+              : 500;
+  sendJson(response, status, { code: error.code, error: error.message });
+}
+
+function parseArguments(arguments_: readonly string[]): { folder: string | undefined; model: string | undefined } {
+  let folder: string | undefined;
+  let model: string | undefined;
+  for (let index = 0; index < arguments_.length; index += 1) {
+    const argument = arguments_[index];
+    if (argument === "--model") {
+      model = arguments_[index + 1];
+      index += 1;
+      continue;
+    }
+    if (!folder && argument && !argument.startsWith("--")) folder = argument;
+  }
+  return { folder, model };
 }
